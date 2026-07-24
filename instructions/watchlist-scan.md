@@ -33,9 +33,11 @@ candidate by what the title + location tell you.
      `fetchMethod` + `careersUrl` + `fetchRecipe`. Apply the recipe's filters and excludes.
    - **`unsupported`**: no method/slug yet — skip the glance and flag it for research (don't guess).
 3. **Glance** every candidate (title + location, your judgment) and assign a verdict:
-   - **high** — clearly a senior+ SWE IC role that fits the profile → goes straight to the fit queue.
-   - **low** — plausible but you're unsure from the title alone → the user reviews it.
+   - **high** — clearly a senior+ SWE IC role that fits the profile.
+   - **low** — plausible but you're unsure from the title alone.
    - **drop** — clearly not a match → discarded.
+   high **and** low both land in my "Scan results" tab for me to triage into Fit myself (I decide what
+   to assess); only **drop** is discarded. Nothing is auto-queued to fit.
    Calibrate against my **profile** from `getContext` (`profile`: level, include/exclude disciplines, locations).
 4. Submit the verdicts with **`submitGlance`** (below).
 5. **Close the job**: call `submitJobResult({ type: "watchlist-scan", jobId, records: [] })` — this

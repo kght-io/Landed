@@ -685,15 +685,15 @@ export function scannedAction(
   return { ok: true, appId: id };
 }
 
-// the agent's superficial glance verdict (title + location, no JD) on a scanned candidate:
-//   high → queue to fit (creates a discovered application) · low → review (your call) · drop → discarded.
-// Finds the existing scanned row (by ats id, else url); creates one if missing (careers-get/browser
-// companies the agent fetched itself). Returns a fit payload for `high` so the route enqueues the job.
+// the agent's superficial glance verdict (title + location, no JD) on a scanned candidate. The glance
+// no longer auto-queues to fit — high & low both land in `review` (the Watchlist "Scan results" tab)
+// for you to triage; only drop is discarded. Finds the existing scanned row (by ats id, else url);
+// creates one if missing (careers-get/browser companies the agent fetched itself).
 export type GlanceInput = {
   company: string; atsId?: string | null; url?: string | null; title?: string | null;
   location?: string | null; department?: string | null; glance: "high" | "low" | "drop"; reason?: string | null;
 };
-export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; fit?: { id: number; company: string; role: string; url?: string; jd?: string }; outcome?: "queued" | "review" | "discarded" } {
+export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outcome?: "review" | "discarded" } {
   const c = canonical(v.company);
   const co = c ? db.select().from(companies).all().find((x) => canonical(x.name)?.key === c.key) : null;
   if (!co) return { ok: false };
@@ -707,8 +707,9 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; fit?
   // Security/intern/Solutions etc.), so every fetch method gets a uniform floor.
   const excluded = isExcludedTitle(title, department);
   const glance = excluded ? "drop" : v.glance;
-  const state = glance === "high" ? "fit_queue" : glance === "low" ? "review" : "dismissed";
-  const outcome = glance === "high" ? "queued" : glance === "low" ? "review" : "discarded";
+  // high & low both go to `review` (you triage them in the Scan-results tab); only drop is discarded.
+  const state = (glance === "drop" ? "dismissed" : "review") as "review" | "dismissed";
+  const outcome: "review" | "discarded" = glance === "drop" ? "discarded" : "review";
   const fields = {
     title,
     location: v.location ?? row?.location ?? null,
@@ -716,11 +717,13 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; fit?
     department,
     verdict: (glance === "drop" ? "dropped" : "kept") as "kept" | "dropped",
     reason: excluded ? "excluded" : v.reason ?? null,
-    state: state as "fit_queue" | "review" | "dismissed",
+    state,
   };
 
-  // Already in the fit queue — idempotent on repeat high glance.
-  if (row && row.state === "fit_queue" && glance === "high") return { ok: true, outcome: "queued" };
+  // Leave anything you've already triaged / queued / applied alone — a re-glance must never pull a
+  // posting you've acted on back into the triage pile.
+  const DECIDED = new Set(["fit_queue", "assessed", "apply_later", "tailoring", "tailored", "applied", "interview", "offer", "accepted", "rejected", "ghost", "withdrawn", "company_skipped", "expired"]);
+  if (row && DECIDED.has(row.state)) return { ok: true, outcome };
 
   let candId: number;
   if (row) {
@@ -730,13 +733,8 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; fit?
     candId = db.insert(postings).values({ companyId: co.id, atsId: v.atsId ?? null, scannedAt: new Date().toISOString(), ...fields }).returning({ id: postings.id }).get().id;
   }
 
-  // high → the candidate enters the fit queue; the route enqueues the fit job (no application yet).
-  if (glance === "high") {
-    logEvent({ entity: "company", entityId: co.id, action: "update", source: "glance", summary: `${co.name} — ${fields.title} · glance:high → fit queue` });
-    return { ok: true, fit: { id: candId, company: co.name, role: fields.title, url: fields.url ?? undefined, jd: row?.jd ?? undefined }, outcome };
-  }
-  logEvent({ entity: "company", entityId: co.id, action: "update", source: "glance", summary: `${co.name} — ${fields.title} · ${excluded ? "excluded (filter)" : "glance:" + v.glance}` });
-  return { ok: true, outcome };
+  logEvent({ entity: "company", entityId: co.id, action: "update", source: "glance", summary: `${co.name} — ${fields.title} · ${excluded ? "excluded (filter)" : "glance:" + v.glance + " → scan results"}` });
+  return { ok: true, appId: candId, outcome };
 }
 
 // --- change-log feed + review queue ---

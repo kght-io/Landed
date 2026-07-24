@@ -699,7 +699,14 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outc
   if (!co) return { ok: false };
 
   const rows = db.select().from(postings).where(eq(postings.companyId, co.id)).all();
-  const row = v.atsId ? rows.find((r) => r.atsId === v.atsId) : v.url ? rows.find((r) => r.url === v.url) : undefined;
+  // Match an existing scanned row: by ATS id, else exact url, else normalized TITLE within the
+  // company. The title fallback is what dedups non-API companies (no atsId, e.g. Apple) whose
+  // careers-page URLs vary per glance — so the same role doesn't spawn a fresh row every scan.
+  const wantTitle = norm(v.title ?? "");
+  const row =
+    (v.atsId ? rows.find((r) => r.atsId === v.atsId) : undefined) ??
+    (v.url ? rows.find((r) => r.url === v.url) : undefined) ??
+    (wantTitle ? rows.find((r) => norm(r.title) === wantTitle) : undefined);
 
   const title = v.title ?? row?.title ?? "(untitled)";
   const department = v.department ?? row?.department ?? null;

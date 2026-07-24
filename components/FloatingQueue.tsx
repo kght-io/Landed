@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bot, X, ArrowRight, Play, Square, CheckCircle2 } from "lucide-react";
-import { useAgentQueue } from "@/components/AgentQueueProvider";
+import { useAgentQueue, QUEUE_CLEARED_EVENT } from "@/components/AgentQueueProvider";
 import { useAgentChats } from "@/components/AgentChatsProvider";
 import { loadTone, loadHint, hasWip, wipBlink, agentColor } from "@/components/jobMeta";
 import { personaFor } from "@/lib/agents/personas";
@@ -34,6 +34,17 @@ export default function FloatingQueue() {
   const toastId = useRef(0);
   const [toasts, setToasts] = useState<{ id: number; type: string; n: number }[]>([]);
   const dismiss = useCallback((id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
+  // A queue can also empty because it was CLEARED (jobs deleted), not completed — track which types
+  // were just cleared so we suppress the "N completed" toast for those; agent-drained queues still toast.
+  const clearedTypes = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const onCleared = (e: Event) => {
+      const t = (e as CustomEvent).detail?.type;
+      if (t) clearedTypes.current.add(t); else clearedTypes.current.add("*");
+    };
+    window.addEventListener(QUEUE_CLEARED_EVENT, onCleared);
+    return () => window.removeEventListener(QUEUE_CLEARED_EVENT, onCleared);
+  }, []);
   useEffect(() => {
     const cur: Record<string, number> = {};
     for (const j of jobs) cur[j.type] = (cur[j.type] ?? 0) + 1;
@@ -42,12 +53,14 @@ export default function FloatingQueue() {
       const p = prevCounts.current[t] ?? 0;
       if (c > (peak.current[t] ?? 0)) peak.current[t] = c;
       if (p > 0 && c === 0) {
+        const clearedManually = clearedTypes.current.delete(t) || clearedTypes.current.delete("*");
         const n = peak.current[t] || p;
+        peak.current[t] = 0;
+        if (clearedManually) continue; // emptied by a manual clear, not by completion → no toast
         const id = ++toastId.current;
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setToasts((ts) => [...ts.slice(-3), { id, type: t, n }]); // keep at most 4 on screen
         setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 6000); // auto-dismiss
-        peak.current[t] = 0;
       }
     }
     prevCounts.current = cur;

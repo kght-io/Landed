@@ -179,6 +179,29 @@ export function createJob(spec: {
   return id;
 }
 
+// Queue the daily auto inbox-sync, idempotently. `id` is the caller's day-keyed id
+// (`dailySyncJobId` → `inbox-sync-daily-YYYY-MM-DD`), which makes "once per day" a DB fact rather
+// than a client-state hope: the UI timer can fire repeatedly — a double-invoked effect, a second
+// tab, a tick inside the 25s queue-poll gap — and only the first one queues.
+//
+// Two guards, both needed:
+//  - the day's row already exists in ANY status → stand down. Not a `createJob` upsert: that would
+//    bounce an already-INGESTED row back to `queued` and re-run the day's sync.
+//  - some other inbox-sync is outstanding (a manual click, "Update interview status") → stand down
+//    rather than stack a second sync of the same mail.
+// Returns whether it actually queued.
+export function enqueueDailyInboxSync(id: string): boolean {
+  if (db.select().from(jobs).where(eq(jobs.id, id)).get()) return false; // today's slot already handled
+  const outstanding = !!db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.type, "inbox-sync"), inArray(jobs.status, ["queued", "wip"])))
+    .get();
+  if (outstanding) return false;
+  createJob({ id, type: "inbox-sync", createdBy: "You" });
+  return true;
+}
+
 // Queue a `watchlist-scan` job per watchlisted company not scraped in the last `staleDays` (or
 // never), skipping any that already have an outstanding (queued/wip) scan job. Deterministic id per
 // company → idempotent: re-clicking "Scrape watchlist" won't duplicate or disturb in-flight scans.

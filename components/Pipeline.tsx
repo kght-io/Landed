@@ -23,7 +23,7 @@ import type { Comment, Posting, FitAssessment, RedoTurn, Status } from "@/lib/ty
 import { JobStatusChip, type WorkStatus } from "@/components/JobStatus";
 import { ago, fmtTs } from "@/lib/format";
 import { usePersistentState } from "@/hooks/usePersistentState";
-import { shouldAutoSyncInbox, INBOX_DAILY_SYNC_KEY } from "@/lib/inbox-schedule";
+import { shouldAutoSyncInbox, dailySyncJobId, INBOX_DAILY_SYNC_KEY, INBOX_SYNC_TIME_KEY, DEFAULT_INBOX_SYNC_TIME } from "@/lib/inbox-schedule";
 
 const FUNNEL_LABEL: Record<string, string> = { sel: "", company: "Company", title: "Title", location: "Location", fit: "Fit", lvl: "Lvl", comment: "Note", gaps: "Gaps", resume: "Resume", status: "Status", applied: "Applied", updated: "Last updated", act: "Action" };
 // The table is `table-layout: fixed` (frozen columns need their declared widths to be authoritative,
@@ -400,24 +400,37 @@ export default function Pipeline() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (inboxSyncQueued) setSyncing(false); }, [inboxSyncQueued]);
 
-  // Daily auto-sync: opt-in configured on /settings (this page only reflects the state + runs the
-  // timer). When on, an in-app timer queues an inbox-sync once the local calendar day rolls over
-  // (never stacking a second — the outstanding guard). The app is always-on, so an hourly tick + a
-  // check on mount is enough; the decision is the pure `shouldAutoSyncInbox`, keeping the effect a
-  // thin trigger. AutoWorkController drains what it queues.
+  // Daily auto-sync: opt-in + time-of-day configured on /settings (this page only reflects the state
+  // + runs the timer). When on, an in-app timer queues an inbox-sync at the scheduled local time, so
+  // starting the app doesn't queue one. The app is always-on, so a minute tick is enough to hit the
+  // scheduled minute; the decision is the pure `shouldAutoSyncInbox`, keeping the effect a thin
+  // trigger. AutoWorkController drains what it queues.
+  //
+  // "At most once a day" is enforced SERVER-side, by the day-keyed job id (`/api/inbox-sync/daily`
+  // + `enqueueDailyInboxSync`) — the client-side guards below are React state and can't see a
+  // double-invoked effect, a second tab, or a tick landing inside the 25s queue-poll gap, all of
+  // which used to stack duplicate syncs. The ref stops this tab re-POSTing a day it already sent.
   const [dailySync] = usePersistentState<boolean>(INBOX_DAILY_SYNC_KEY, false);
+  const [dailySyncAt] = usePersistentState<string>(INBOX_SYNC_TIME_KEY, DEFAULT_INBOX_SYNC_TIME);
+  const autoSyncSent = useRef<string | null>(null);
   useEffect(() => {
     const tick = () => {
-      if (shouldAutoSyncInbox({ enabled: dailySync, lastSynced: inboxLastSynced, outstanding: inboxSyncQueued || syncing, now: new Date() })) {
-        setSyncing(true);
-        add({ type: "inbox-sync" });
-        pendo.track("inbox_sync_queued", { auto: true });
-      }
+      const now = new Date();
+      if (!shouldAutoSyncInbox({ enabled: dailySync, at: dailySyncAt, lastSynced: inboxLastSynced, outstanding: inboxSyncQueued || syncing, now })) return;
+      const id = dailySyncJobId(now, dailySyncAt);
+      if (autoSyncSent.current === id) return; // already sent today's from this tab
+      autoSyncSent.current = id;
+      setSyncing(true);
+      fetch("/api/inbox-sync/daily", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) })
+        .then((r) => r.json())
+        .then((d) => { if (d?.queued) pendo.track("inbox_sync_queued", { auto: true }); })
+        .catch(() => { autoSyncSent.current = null; }) // let a later tick retry a failed POST
+        .finally(() => bump()); // pulse + refresh the queue, same as a manual add
     };
-    tick(); // check on mount / whenever inputs change (day rolled over, sync drained, toggle flipped)
-    const iv = setInterval(tick, 3_600_000); // hourly — catch the midnight rollover without a tab focus
+    tick(); // check on mount / whenever inputs change (sync drained, toggle or time changed)
+    const iv = setInterval(tick, 60_000); // per-minute — hit the scheduled time without a tab focus
     return () => clearInterval(iv);
-  }, [dailySync, inboxLastSynced, inboxSyncQueued, syncing, add]);
+  }, [dailySync, dailySyncAt, inboxLastSynced, inboxSyncQueued, syncing, bump]);
   // A stable signature of the live queue — changes only when a job is added/removed/drained, not on
   // every poll. Deleting a queued fit/tailoring job un-queues its candidate server-side (fit_queue →
   // review, tailoring → assessed), so the funnel must re-read to move that row out of its stage.

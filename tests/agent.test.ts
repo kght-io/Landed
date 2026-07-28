@@ -3,7 +3,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, seedCandidate, db, jobs, postings, events, companies } from "./helpers";
-import { submitJobResult, createJob, claimJob, deleteQueuedJob, listJobs, listFitQueue, enqueueFit, inboxLastSynced, queueStaleWatchlistScans } from "@/lib/jobs/store";
+import { submitJobResult, createJob, claimJob, deleteQueuedJob, listJobs, listFitQueue, enqueueFit, inboxLastSynced, queueStaleWatchlistScans, enqueueDailyInboxSync } from "@/lib/jobs/store";
 import { listPostings, listScannedPostings, upsertCompanies, setWatchlist, listCompanies, listWatchlist, updateApplication, listPendingMatches, addComment, deleteComment, getPosting } from "@/lib/db/queries";
 import { resolvePendingMatch } from "@/lib/agents/reconcile";
 
@@ -478,4 +478,32 @@ test("closing a watchlist-scan job stamps the company's lastScrapedAt (so it isn
   const co = db.select().from(companies).where(eq(companies.name, "ScanMe")).get()!;
   assert.ok(co.lastScrapedAt, "lastScrapedAt stamped");
   assert.equal(queueStaleWatchlistScans(3).queued, 0, "no longer stale → not re-queued");
+});
+
+// --- the daily inbox-sync is queued at most once per day, enforced server-side ---------------
+
+test("enqueueDailyInboxSync is idempotent for a day id — repeat ticks/tabs don't stack duplicates", () => {
+  const id = "inbox-sync-daily-2026-07-24";
+  assert.equal(enqueueDailyInboxSync(id), true);
+  assert.equal(enqueueDailyInboxSync(id), false); // a double-fired effect 373ms later
+  assert.equal(enqueueDailyInboxSync(id), false); // a second tab
+  assert.equal(listJobs().filter((j) => j.type === "inbox-sync").length, 1);
+});
+
+test("enqueueDailyInboxSync doesn't re-queue the day's job after it has been ingested", () => {
+  const id = "inbox-sync-daily-2026-07-24";
+  enqueueDailyInboxSync(id);
+  claimJob(id, "agent-A");
+  submitJobResult({ type: "inbox-sync", jobId: id, records: [] });
+  assert.equal(listJobs().find((j) => j.id === id)!.status, "ingested");
+
+  assert.equal(enqueueDailyInboxSync(id), false, "same day → stays ingested, never bounced back to queued");
+  assert.equal(listJobs().find((j) => j.id === id)!.status, "ingested");
+  assert.equal(enqueueDailyInboxSync("inbox-sync-daily-2026-07-25"), true, "next day → a fresh job");
+});
+
+test("enqueueDailyInboxSync stands down while any inbox-sync is outstanding (e.g. a manual one)", () => {
+  createJob({ type: "inbox-sync", createdBy: "You" }); // manual click, its own random id
+  assert.equal(enqueueDailyInboxSync("inbox-sync-daily-2026-07-24"), false);
+  assert.equal(listJobs().filter((j) => j.type === "inbox-sync").length, 1);
 });

@@ -1,6 +1,6 @@
-/* `source(none)` disables Tailwind's automatic project-root content scan (which walks every dir,
-   including a root-owned `caddy/` it can't read → build 500s) and we point it only at the two dirs
-   that actually contain classes. */
+/* `source(none)` disables Tailwind's automatic project-root content scan and points it at the only
+   two dirs that contain classes — the scan would otherwise walk the whole monorepo (packages/,
+   scripts/, tests/, instructions/) for no gain. */
 @import "tailwindcss" source(none);
 @source "../app";
 @source "../components";

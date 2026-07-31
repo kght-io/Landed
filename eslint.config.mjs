@@ -26,10 +26,8 @@ const eslintConfig = defineConfig([
     "**/out/**",
     "build/**",
     "**/next-env.d.ts",
-    // Non-source dirs eslint should never walk. `caddy/` is root-owned (reverse-proxy
-    // runtime state) and errors the whole run with EACCES if scanned; `data/` holds the
-    // SQLite DB and generated assets. Neither contains lintable source.
-    "caddy/**",
+    // `data/` holds the SQLite DB and generated assets — no lintable source, and eslint
+    // shouldn't walk it.
     "data/**",
   ]),
 ]);

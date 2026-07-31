@@ -45,10 +45,6 @@ apps/web/next-env.d.ts
 # local sqlite db
 /data/
 
-# Caddy's local data/certs if it ever writes into the repo (root-owned; keep it out of the
-# Tailwind/Turbopack content scan, which can't read a root-only dir → build 500s)
-/caddy/
-
 # Machine-specific local serving config (hardcoded absolute paths — not portable)
 /scripts/landed.Caddyfile
 /scripts/com.kaung.landed-proxy.plist

@@ -27,8 +27,9 @@ function connection() {
   // Fold the WAL into the main .db file frequently so the file stays current —
   // otherwise a plain cp backup captures a stale snapshot (learned the hard way).
   sqlite.pragma("wal_autocheckpoint = 100");
-  // Base schema — created on a fresh DB so a clean clone is self-bootstrapping (drizzle-kit
-  // push is flaky in this project, so we don't rely on it). These mirror the Drizzle schema in
+  // Base schema — created on a fresh DB so a clean clone is self-bootstrapping. There is no
+  // migration tool: drizzle-kit was flaky here and has been removed, so this code IS the
+  // migration path. These mirror the Drizzle schema in
   // ./schema.ts (the ORM source of truth); the per-column ALTERs further down idempotently add
   // anything newer, and enumGuard() below enforces the enum sets. All `IF NOT EXISTS`, so an
   // existing DB is untouched. (Tests bootstrap through this same path — there is no separate
@@ -88,8 +89,8 @@ function connection() {
     new_companies INTEGER NOT NULL DEFAULT 0,
     summary TEXT
   )`);
-  // Lightweight bootstrap for tables added after the initial schema (drizzle-kit push
-  // is flaky in this project — see notes). Idempotent.
+  // Lightweight bootstrap for tables added after the initial schema — the app owns its own
+  // migrations (see the note above). Idempotent.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS pending_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,

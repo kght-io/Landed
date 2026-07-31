@@ -41,7 +41,6 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dependency-cruiser": "^17.4.3",
-    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "playwright": "^1.61.1",
@@ -54,7 +53,6 @@
     "@emnapi/runtime": "1.11.2",
     "@emnapi/wasi-threads": "1.2.2",
     "postcss": "8.5.22",
-    "sharp": "0.35.3",
-    "esbuild": ">=0.25.0"
+    "sharp": "0.35.3"
   }
 }

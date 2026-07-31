@@ -1,8 +1,8 @@
-// Side-effect module: MUST be imported before any "@landed/core/*" module so the app's
+// Side-effect module: MUST be imported before any "@landed/backend/*" module so the app's
 // DB connection and asset paths point at a throwaway temp location, never the real
 // data/jobhunt.db. ESM evaluates this fully before later imports in the test file.
 //
-// The schema is built by the app's own bootstrap (packages/core/src/db/index.ts) the first time @landed/core/db is
+// The schema is built by the app's own bootstrap (packages/core/src/db/index.ts) the first time @landed/backend/db is
 // imported — there is no separate test schema to maintain. Just point the env at a temp dir.
 import fs from "node:fs";
 import os from "node:os";

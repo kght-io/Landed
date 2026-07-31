@@ -13,8 +13,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { eq, and } from "drizzle-orm";
-import { db } from "@landed/core/db";
-import { prepQuestions, prepAttempts, prepProgress } from "@landed/core/db/schema";
+import { db } from "@landed/backend/db";
+import { prepQuestions, prepAttempts, prepProgress } from "@landed/backend/db/schema";
 import { norm } from "@landed/shared/agents/canonical";
 
 type PlanProblem = { id: number; name: string; num?: number; review?: boolean };

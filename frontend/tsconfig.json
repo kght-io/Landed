@@ -1,0 +1,25 @@
+{
+  // Next.js + editor config for the frontend workspace. The authoritative gate is the root
+  // tsconfig.json (`npm run typecheck`), which compiles this app together with backend + shared.
+  // Paths are re-declared relative to THIS file because `extends` resolves "paths" against the
+  // config that declares them — and the workspaces are now siblings, one level up.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@landed/backend/db": ["../backend/src/db/index.ts"],
+      "@landed/backend/*": ["../backend/src/*"],
+      "@landed/shared/*": ["../shared/src/*"],
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "../backend/**/*.ts",
+    "../shared/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

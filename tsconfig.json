@@ -1,17 +1,19 @@
 {
   // The repo-wide typecheck gate: `npm run typecheck` compiles EVERY workspace plus tests and
-  // scripts in one pass, so a break anywhere (web ⇄ core ⇄ shared) surfaces in one command.
-  // apps/web/tsconfig.json exists separately for Next.js and the editor; this file is the gate.
+  // scripts in one pass, so a break anywhere (frontend ⇄ backend ⇄ shared) surfaces in one command.
+  // frontend/tsconfig.json exists separately for Next.js and the editor; this file is the gate.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "plugins": [{ "name": "next" }]
   },
   "include": [
-    "apps/web/next-env.d.ts",
-    "apps/web/**/*.ts",
-    "apps/web/**/*.tsx",
-    "apps/web/.next/types/**/*.ts",
-    "packages/**/*.ts",
+    "frontend/next-env.d.ts",
+    "frontend/**/*.ts",
+    "frontend/**/*.tsx",
+    "frontend/.next/types/**/*.ts",
+    "backend/**/*.ts",
+    "shared/**/*.ts",
+    "mcp/**/*.mjs",
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "*.ts",

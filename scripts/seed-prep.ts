@@ -1,8 +1,8 @@
 // Seed prep_questions from the extracted CoWork artifact data. Idempotent: upserts on
 // id and NEVER touches prep_attempts / prep_progress, so re-running is safe and preserves
 // your practice history. Run: npm run seed:prep
-import { db } from "@landed/core/db";
-import { prepQuestions } from "@landed/core/db/schema";
+import { db } from "@landed/backend/db";
+import { prepQuestions } from "@landed/backend/db/schema";
 import { sql } from "drizzle-orm";
 import { PREP_SEED } from "@landed/shared/prep/seed-data";
 

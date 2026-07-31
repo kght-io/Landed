@@ -2,7 +2,7 @@ import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
   dialect: "sqlite",
-  schema: "./packages/core/src/db/schema.ts",
+  schema: "./backend/src/db/schema.ts",
   out: "./drizzle",
   dbCredentials: { url: "./data/jobhunt.db" },
 });

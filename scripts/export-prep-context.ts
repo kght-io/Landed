@@ -5,7 +5,7 @@
 // Writes <ASSET_ROOT>/interview-prep/<slug>/context.md for every company in the interview/offer
 // stage, plus a README index. The generation lives in lib/prep/export-context.ts (shared with the
 // in-app per-company "Dump context" button). Idempotent — re-run any time to refresh.
-import { exportAllPrepContext, PREP_ROOT } from "@landed/core/prep/export-context";
+import { exportAllPrepContext, PREP_ROOT } from "@landed/backend/prep/export-context";
 
 const done = exportAllPrepContext();
 if (!done.length) {

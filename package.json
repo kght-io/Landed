@@ -3,19 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "frontend",
+    "backend",
+    "shared",
+    "mcp"
   ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "dev": "npm run dev --workspace @landed/web",
-    "build": "npm run build --workspace @landed/web",
-    "start": "npm run start --workspace @landed/web",
+    "dev": "npm run dev --workspace @landed/frontend",
+    "build": "npm run build --workspace @landed/frontend",
+    "start": "npm run start --workspace @landed/frontend",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "boundary": "depcruise --config .dependency-cruiser-boundary.cjs apps packages",
+    "boundary": "depcruise --config .dependency-cruiser-boundary.cjs frontend backend shared mcp",
     "seed:prep": "tsx scripts/seed-prep.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "prep:export": "node --env-file-if-exists=.env --import tsx scripts/export-prep-context.ts",
@@ -23,6 +25,7 @@
     "diagram:arch": "tsx scripts/gen-architecture-diagram.ts",
     "diagram:pipeline": "tsx scripts/gen-pipeline-diagram.ts",
     "backup": "node scripts/backup-db.mjs",
+    "logs:rotate": "node scripts/rotate-logs.mjs",
     "purge:nonlocal": "tsx scripts/purge-nonlocal.ts",
     "tailor:docx": "node --import tsx scripts/tailor-docx.ts",
     "levels:scrape": "node scripts/levels-scrape.mjs",

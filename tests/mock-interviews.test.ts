@@ -3,7 +3,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { nextSessionName, saveMockSession, listMockSessions, mockDir } from "@landed/core/prep/mock-interviews";
+import { nextSessionName, saveMockSession, listMockSessions, mockDir } from "@landed/backend/prep/mock-interviews";
 
 // The temp ASSET_ROOT is shared across this file's tests — clear the mock-interviews folder between
 // them so each starts from a known-empty tree.

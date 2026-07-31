@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { safeName, dedupeName, saveAttachments, listAttachments, attachmentsDir } from "@landed/core/prep/attachments";
+import { safeName, dedupeName, saveAttachments, listAttachments, attachmentsDir } from "@landed/backend/prep/attachments";
 
 test("safeName strips directories, path separators, and control chars — keeps the extension", () => {
   assert.equal(safeName("../../etc/passwd"), "passwd");

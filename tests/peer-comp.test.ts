@@ -3,9 +3,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, db, postings } from "./helpers";
-import { gatherPeerInputs } from "@landed/core/peercomp/inputs";
-import { getPeerComp, setPeerComp } from "@landed/core/jobs/peercomps";
-import { jobDef } from "@landed/core/jobs/registry";
+import { gatherPeerInputs } from "@landed/backend/peercomp/inputs";
+import { getPeerComp, setPeerComp } from "@landed/backend/jobs/peercomps";
+import { jobDef } from "@landed/backend/jobs/registry";
 
 beforeEach(() => reset());
 

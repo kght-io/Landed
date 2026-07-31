@@ -3,10 +3,10 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, db, jobs } from "./helpers";
-import { getPosting } from "@landed/core/db/queries";
-import { enqueueInterviewBrief, enqueueInterviewEmails } from "@landed/core/jobs/store";
-import { jobDef } from "@landed/core/jobs/registry";
-import { nextTranscriptName } from "@landed/core/prep/transcripts";
+import { getPosting } from "@landed/backend/db/queries";
+import { enqueueInterviewBrief, enqueueInterviewEmails } from "@landed/backend/jobs/store";
+import { jobDef } from "@landed/backend/jobs/registry";
+import { nextTranscriptName } from "@landed/backend/prep/transcripts";
 
 beforeEach(() => reset());
 

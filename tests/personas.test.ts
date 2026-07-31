@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PERSONA, personaFor } from "@landed/shared/agents/personas";
-import { JOB_DEFS } from "@landed/core/jobs/registry";
+import { JOB_DEFS } from "@landed/backend/jobs/registry";
 
 // Every registered job type should have a task-descriptive persona — no card should ever fall back
 // to the legacy "CoWork" brand as its name. (Regression: interview-brief showed as "CoWork" on the

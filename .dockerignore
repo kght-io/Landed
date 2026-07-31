@@ -1,0 +1,30 @@
+# Keep the build context small and, more importantly, keep host state OUT of the image — `data/`
+# holds the live SQLite DB and 471 MB of backups, and it is a mounted volume at runtime, not
+# something to bake in.
+data/
+asset-root/
+caddy/
+
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+build/
+
+.git/
+.github/
+.claude/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+# macOS-only local serving config (absolute paths, and Caddy has no role inside the container)
+scripts/landed.Caddyfile
+scripts/com.kaung.landed-proxy.plist
+
+.DS_Store
+**/.DS_Store
+*.log

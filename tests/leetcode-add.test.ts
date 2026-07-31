@@ -2,9 +2,9 @@ import "./setup";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { reset, db } from "./helpers";
-import { prepQuestions, prepAttempts, prepCompany } from "@landed/core/db/schema";
-import { addLeetcodeStub, listQuestions } from "@landed/core/db/prep";
-import { submitJobResult } from "@landed/core/jobs/store";
+import { prepQuestions, prepAttempts, prepCompany } from "@landed/backend/db/schema";
+import { addLeetcodeStub, listQuestions } from "@landed/backend/db/prep";
+import { submitJobResult } from "@landed/backend/jobs/store";
 
 function resetPrep() {
   reset();

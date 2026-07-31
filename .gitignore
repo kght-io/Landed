@@ -14,9 +14,9 @@ node_modules/
 # testing
 /coverage
 
-# next.js (the app lives in apps/web now)
-/apps/web/.next/
-/apps/web/out/
+# next.js (the app lives in frontend now)
+/frontend/.next/
+/frontend/out/
 
 # production
 /build
@@ -40,7 +40,7 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-apps/web/next-env.d.ts
+frontend/next-env.d.ts
 
 # local sqlite db
 /data/

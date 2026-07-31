@@ -1,7 +1,7 @@
 /**
  * dependency-cruiser config for the auto-generated architecture diagram.
  * Tuned for a HIGH-LEVEL view: modules are collapsed to one box per workspace sub-folder
- * (e.g. packages/core/src/jobs, apps/web/components) so the diagram shows architecture,
+ * (e.g. backend/src/jobs, frontend/components) so the diagram shows architecture,
  * not 400 individual files.
  *
  * This file draws PICTURES — it deliberately carries no rules, because `collapse` and
@@ -31,9 +31,9 @@ module.exports = {
       ],
     },
     // Chart only our own source — drops node builtins (fs, path) and deps.
-    includeOnly: "^(apps|packages)",
+    includeOnly: "^(frontend|backend|shared|mcp)",
     // Collapse every module to a high-level box: one per workspace sub-folder.
-    collapse: "^(apps/[^/]+/[^/]+|packages/[^/]+/src/[^/]+)",
+    collapse: "^(frontend/[^/]+|(backend|shared)/src/[^/]+|mcp)",
     tsPreCompilationDeps: true,
     tsConfig: { fileName: "tsconfig.json" },
     enhancedResolveOptions: {

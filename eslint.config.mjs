@@ -7,7 +7,7 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // The Next app is one workspace among several — point the plugin at it, or its page/route
   // detection runs against the repo root and reports phantom "no pages directory" problems.
-  { settings: { next: { rootDir: "apps/web" } } },
+  { settings: { next: { rootDir: "frontend" } } },
   // A leading underscore marks an intentionally-unused binding (a discarded destructure key like
   // `const { targetTitles: _t, ...rest } = c`, an unused arg). Standard convention — opt it out of
   // the unused-vars rule so the discard reads as deliberate instead of firing a warning.

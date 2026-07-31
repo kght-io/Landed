@@ -2,8 +2,8 @@ import "./setup";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { reset, seedCandidate } from "./helpers";
-import { setConfig } from "@landed/core/db/config-store";
-import { onboardingStatus, onboardingComplete } from "@landed/core/onboarding";
+import { setConfig } from "@landed/backend/db/config-store";
+import { onboardingStatus, onboardingComplete } from "@landed/backend/onboarding";
 
 beforeEach(() => reset());
 

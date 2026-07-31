@@ -7,40 +7,40 @@
  * these rules unable to fire. Rules need the full, uncollapsed graph — node builtins included.
  *
  * The three invariants:
- *   core  -/->  apps        the backend never reaches into the frontend
- *   shared -/-> core        (at runtime — type-only imports are erased, so they're allowed)
+ *   backend -/-> frontend   the backend never reaches into the frontend
+ *   shared -/-> backend     (at runtime — type-only imports are erased, so they're allowed)
  *   shared -/-> node        shared ships to the browser
  */
 module.exports = {
   forbidden: [
     {
-      name: "core-not-to-web",
+      name: "backend-not-to-frontend",
       severity: "error",
       comment:
-        "The backend must not depend on the frontend. packages/core is imported BY apps/web's route " +
+        "The backend must not depend on the frontend. backend is imported BY frontend's route " +
         "handlers, never the other way round — an edge here means server logic reached into a page " +
         "or component, and the split is no longer real.",
-      from: { path: "^packages/core" },
-      to: { path: "^apps/" },
+      from: { path: "^backend" },
+      to: { path: "^(frontend|mcp)/" },
     },
     {
-      name: "shared-not-to-core-at-runtime",
+      name: "shared-not-to-backend-at-runtime",
       severity: "error",
       comment:
-        "packages/shared ships to the browser, so it must never pull in the DB driver or anything " +
-        "else from packages/core AT RUNTIME. Type-only imports are exempt (TypeScript erases them): " +
+        "shared ships to the browser, so it must never pull in the DB driver or anything " +
+        "else from backend AT RUNTIME. Type-only imports are exempt (TypeScript erases them): " +
         "a couple of shared modules are typed against drizzle-inferred row types (PostingRow) that " +
         "can only be declared next to the schema.",
-      from: { path: "^packages/shared" },
-      to: { path: "^packages/core", dependencyTypesNot: ["type-only"] },
+      from: { path: "^shared" },
+      to: { path: "^backend", dependencyTypesNot: ["type-only"] },
     },
     {
       name: "shared-stays-browser-safe",
       severity: "error",
       comment:
-        "packages/shared is imported by client components. A node builtin here breaks the browser " +
-        "bundle — the module belongs in packages/core instead.",
-      from: { path: "^packages/shared" },
+        "shared is imported by client components. A node builtin here breaks the browser " +
+        "bundle — the module belongs in backend instead.",
+      from: { path: "^shared" },
       to: { dependencyTypes: ["core"] },
     },
   ],

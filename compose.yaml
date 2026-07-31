@@ -1,0 +1,27 @@
+# Single instance, persistent volumes — the deployment shape the app requires (see Dockerfile).
+#
+# `deploy.replicas` is pinned to 1 deliberately and is not a knob: SQLite is single-writer and the
+# agent runner's .pid files assume one runner. A second replica corrupts both silently.
+
+services:
+  web:
+    build: .
+    image: landed:local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Named volumes, not bind mounts to ./data — a bind would let the container write the same
+      # SQLite file the local `next dev` server already has open, giving you two writers.
+      - landed-data:/app/data
+      - landed-assets:/app/asset-root
+    environment:
+      NODE_ENV: production
+      REPO_ROOT: /app
+      ASSET_ROOT: /app/asset-root
+    deploy:
+      replicas: 1
+
+volumes:
+  landed-data:
+  landed-assets:

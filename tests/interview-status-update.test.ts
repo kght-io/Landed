@@ -3,8 +3,8 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, db, postings, jobs } from "./helpers";
-import { prepQuestions, prepAttempts, prepCompany } from "@landed/core/db/schema";
-import { updateInterviewStatus } from "@landed/core/jobs/store";
+import { prepQuestions, prepAttempts, prepCompany } from "@landed/backend/db/schema";
+import { updateInterviewStatus } from "@landed/backend/jobs/store";
 import { canonical } from "@landed/shared/agents/canonical";
 
 // reset() (helpers) doesn't touch the prep_* tables — clear them too so profiles don't leak.

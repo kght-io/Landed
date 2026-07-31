@@ -1,10 +1,10 @@
 // Seed the DB from the real tracker.csv. Run: npx tsx scripts/import-tracker.ts
 // Re-run with FORCE=1 to wipe + reimport.
 import fs from "node:fs";
-import { db } from "@landed/core/db";
-import { companies, postings } from "@landed/core/db/schema";
+import { db } from "@landed/backend/db";
+import { companies, postings } from "@landed/backend/db/schema";
 import { eq, sql, inArray } from "drizzle-orm";
-import { PATHS } from "@landed/core/config";
+import { PATHS } from "@landed/backend/config";
 import { TRACKER_STAGES } from "@landed/shared/pipeline";
 import { norm } from "@landed/shared/agents/canonical";
 import { isTarget } from "@landed/shared/targets.mjs";

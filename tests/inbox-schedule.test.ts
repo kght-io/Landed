@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldAutoSyncInbox, parseSyncTime, dailySyncJobId, DEFAULT_INBOX_SYNC_TIME } from "@landed/shared/inbox-schedule";
+import {
+  shouldAutoSyncInbox,
+  parseSyncTime,
+  dailySyncJobId,
+  inboxSyncPending,
+  INBOX_SYNC_PENDING_GRACE_MS,
+  DEFAULT_INBOX_SYNC_TIME,
+} from "@landed/shared/inbox-schedule";
 
 const at = DEFAULT_INBOX_SYNC_TIME; // 08:00 local
 
@@ -99,4 +106,36 @@ test("parseSyncTime falls back to the default on junk", () => {
   assert.deepEqual(parseSyncTime("25:00"), { hour: 8, minute: 0 });
   assert.deepEqual(parseSyncTime("08:99"), { hour: 8, minute: 0 });
   assert.deepEqual(parseSyncTime(undefined), { hour: 8, minute: 0 });
+});
+
+// --- the Sync-inbox button's optimistic "busy" latch -------------------------------------------
+// The latch only exists to cover the click→queue-poll gap. It must never outlive that gap: two
+// paths queue nothing observable (a day-keyed POST deduped server-side, a job drained inside the
+// poll gap) and a boolean latch with only "the job showed up" as its release wedges the button
+// disabled for the rest of the day.
+
+test("an outstanding inbox-sync job keeps the button busy, however old the latch", () => {
+  const now = 1_000_000;
+  assert.equal(inboxSyncPending({ startedAt: null, outstanding: true, now }), true);
+  assert.equal(inboxSyncPending({ startedAt: now - 10 * 60_000, outstanding: true, now }), true);
+});
+
+test("a fresh latch reads busy — covers the gap before the queue poll sees the job", () => {
+  const now = 1_000_000;
+  assert.equal(inboxSyncPending({ startedAt: now, outstanding: false, now }), true);
+  assert.equal(inboxSyncPending({ startedAt: now - 1_000, outstanding: false, now }), true);
+});
+
+test("the latch expires, so a sync that queued nothing observable can't wedge the button", () => {
+  const now = 1_000_000;
+  assert.equal(inboxSyncPending({ startedAt: now - INBOX_SYNC_PENDING_GRACE_MS, outstanding: false, now }), false);
+  assert.equal(inboxSyncPending({ startedAt: now - 60 * 60_000, outstanding: false, now }), false);
+});
+
+test("the grace window outlasts the 25s queue poll, so a real job is never flagged idle mid-gap", () => {
+  assert.ok(INBOX_SYNC_PENDING_GRACE_MS > 25_000);
+});
+
+test("no latch and nothing outstanding → idle", () => {
+  assert.equal(inboxSyncPending({ startedAt: null, outstanding: false, now: 1_000_000 }), false);
 });

@@ -39,6 +39,29 @@ export function dailySyncJobId(now: Date, at?: string | null): string {
   return `inbox-sync-daily-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+// How long the Sync-inbox button's optimistic "busy" state may outlive the click that set it.
+// It exists only to cover the gap until the 25s queue poll notices the new job, so it needs to
+// outlast one poll — and no more.
+export const INBOX_SYNC_PENDING_GRACE_MS = 40_000;
+
+// Whether the Sync-inbox button should read (and behave as) busy. An outstanding job is the real
+// signal; `startedAt` is the optimistic cover for the poll gap, so a fast double-click can't stack
+// two syncs.
+//
+// The optimistic half MUST expire. Two paths set it and then queue nothing the poll can ever
+// observe: the day-keyed daily POST deduped server-side (`queued: false`, no row is created), and
+// a job the agent drains inside the poll gap. A latch released only by "the job showed up" stays
+// stuck true in both, wedging the button disabled for the rest of the day.
+export function inboxSyncPending(opts: {
+  startedAt: number | null; // epoch ms of the optimistic click, or null
+  outstanding: boolean; // an inbox-sync job is queued/wip right now
+  now: number;
+}): boolean {
+  const { startedAt, outstanding, now } = opts;
+  if (outstanding) return true;
+  return startedAt !== null && now - startedAt < INBOX_SYNC_PENDING_GRACE_MS;
+}
+
 export function shouldAutoSyncInbox(opts: {
   enabled: boolean; // the user's "Daily" toggle
   at?: string | null; // scheduled local time of day, "HH:MM" (defaults to 08:00)

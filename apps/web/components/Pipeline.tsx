@@ -23,7 +23,7 @@ import type { Comment, Posting, FitAssessment, RedoTurn, Status } from "@landed/
 import { JobStatusChip, type WorkStatus } from "@/components/JobStatus";
 import { ago, fmtTs } from "@landed/shared/format";
 import { usePersistentState } from "@/hooks/usePersistentState";
-import { shouldAutoSyncInbox, dailySyncJobId, INBOX_DAILY_SYNC_KEY, INBOX_SYNC_TIME_KEY, DEFAULT_INBOX_SYNC_TIME } from "@landed/shared/inbox-schedule";
+import { shouldAutoSyncInbox, inboxSyncPending, INBOX_SYNC_PENDING_GRACE_MS, dailySyncJobId, INBOX_DAILY_SYNC_KEY, INBOX_SYNC_TIME_KEY, DEFAULT_INBOX_SYNC_TIME } from "@landed/shared/inbox-schedule";
 
 const FUNNEL_LABEL: Record<string, string> = { sel: "", company: "Company", title: "Title", location: "Location", fit: "Fit", lvl: "Lvl", comment: "Note", gaps: "Gaps", resume: "Resume", status: "Status", applied: "Applied", updated: "Last updated", act: "Action" };
 // The table is `table-layout: fixed` (frozen columns need their declared widths to be authoritative,
@@ -361,9 +361,11 @@ export default function Pipeline() {
     return choice === "keep" ? { keepTailoringJob: true } : {};
   }, [isQueued, isWorking]);
   // Whether an inbox-sync job is already outstanding (queued or claimed) — one at a time is enough.
-  // `syncing` covers the gap between clicking and the queue re-fetch so a fast double-click can't
-  // stack two jobs; it clears once the queued job actually shows up.
-  const [syncing, setSyncing] = useState(false);
+  // `syncStartedAt` covers the gap between clicking and the queue re-fetch so a fast double-click
+  // can't stack two jobs. It's a TIMESTAMP, not a flag: "the queued job showed up" can't be the only
+  // release, because a deduped daily POST and a job drained inside the poll gap both queue nothing
+  // the poll will ever see — which used to leave the button disabled for the rest of the day.
+  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null);
   // Inbox sync needs Gmail wired — grey the button out until it is. Start `true` to avoid a disabled
   // flash before the check resolves; re-check on focus (so connecting Gmail elsewhere frees it).
   const [gmailReady, setGmailReady] = useState(true);
@@ -395,10 +397,20 @@ export default function Pipeline() {
     }
   };
   const inboxSyncQueued = jobs.some((j) => j.type === "inbox-sync");
-  // Clear the optimistic pending flag once the queued job actually appears; a one-shot reconcile with
-  // the polled queue, not a render-driving loop.
+  // Drop the optimistic timestamp once the queued job actually appears — the job itself is now the
+  // signal, so the button stays busy for as long as the work really is outstanding.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (inboxSyncQueued) setSyncing(false); }, [inboxSyncQueued]);
+  useEffect(() => { if (inboxSyncQueued) setSyncStartedAt(null); }, [inboxSyncQueued]);
+  // …and expire it on a timer if no job ever shows up, so the button always recovers. A timer rather
+  // than a `Date.now()` comparison in render, which would make render impure.
+  useEffect(() => {
+    if (syncStartedAt === null) return;
+    const t = setTimeout(() => setSyncStartedAt(null), INBOX_SYNC_PENDING_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [syncStartedAt]);
+  // The button's busy state. A live `syncStartedAt` is always within the grace window (the effect
+  // above clears it), so this is `inboxSyncPending` with the clock already accounted for.
+  const syncing = inboxSyncQueued || syncStartedAt !== null;
 
   // Daily auto-sync: opt-in + time-of-day configured on /settings (this page only reflects the state
   // + runs the timer). When on, an in-app timer queues an inbox-sync at the scheduled local time, so
@@ -416,21 +428,26 @@ export default function Pipeline() {
   useEffect(() => {
     const tick = () => {
       const now = new Date();
-      if (!shouldAutoSyncInbox({ enabled: dailySync, at: dailySyncAt, lastSynced: inboxLastSynced, outstanding: inboxSyncQueued || syncing, now })) return;
+      // Re-check the latch against a real clock instead of trusting the expiry timer: a backgrounded
+      // tab throttles timers, so `syncStartedAt` can still be set long after it should have lapsed.
+      const outstanding = inboxSyncPending({ startedAt: syncStartedAt, outstanding: inboxSyncQueued, now: now.getTime() });
+      if (!shouldAutoSyncInbox({ enabled: dailySync, at: dailySyncAt, lastSynced: inboxLastSynced, outstanding, now })) return;
       const id = dailySyncJobId(now, dailySyncAt);
       if (autoSyncSent.current === id) return; // already sent today's from this tab
       autoSyncSent.current = id;
-      setSyncing(true);
+      setSyncStartedAt(now.getTime());
       fetch("/api/inbox-sync/daily", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) })
         .then((r) => r.json())
-        .then((d) => { if (d?.queued) pendo.track("inbox_sync_queued", { auto: true }); })
-        .catch(() => { autoSyncSent.current = null; }) // let a later tick retry a failed POST
+        // `queued: false` = the server already has today's row, so no job will ever reach the queue.
+        // Release the optimistic latch now rather than making the button wait out the grace window.
+        .then((d) => { if (d?.queued) pendo.track("inbox_sync_queued", { auto: true }); else setSyncStartedAt(null); })
+        .catch(() => { autoSyncSent.current = null; setSyncStartedAt(null); }) // let a later tick retry a failed POST
         .finally(() => bump()); // pulse + refresh the queue, same as a manual add
     };
     tick(); // check on mount / whenever inputs change (sync drained, toggle or time changed)
     const iv = setInterval(tick, 60_000); // per-minute — hit the scheduled time without a tab focus
     return () => clearInterval(iv);
-  }, [dailySync, dailySyncAt, inboxLastSynced, inboxSyncQueued, syncing, bump]);
+  }, [dailySync, dailySyncAt, inboxLastSynced, inboxSyncQueued, syncStartedAt, bump]);
   // A stable signature of the live queue — changes only when a job is added/removed/drained, not on
   // every poll. Deleting a queued fit/tailoring job un-queues its candidate server-side (fit_queue →
   // review, tailoring → assessed), so the funnel must re-read to move that row out of its stage.
@@ -1077,7 +1094,7 @@ export default function Pipeline() {
                   (a read-only reflection — configure it on /settings). */}
               {(() => { const queued = inboxSyncQueued || syncing; const noGmail = !gmailReady; const off = queued || noGmail; return (
               <button
-                onClick={() => { if (!off) { setSyncing(true); add({ type: "inbox-sync" }); pendo.track("inbox_sync_queued"); } }}
+                onClick={() => { if (!off) { setSyncStartedAt(Date.now()); add({ type: "inbox-sync" }); pendo.track("inbox_sync_queued"); } }}
                 disabled={off}
                 title={noGmail ? "Connect Gmail on the Settings page to sync your inbox" : queued ? "An inbox sync is already queued — run your agent queue" : `Queue an inbox sync for the agent — last synced ${fmtTs(inboxLastSynced)}${dailySync ? " · daily auto-sync on" : ""}`}
                 className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-zinc-300 ring-1 ring-inset ring-zinc-800 transition hover:text-zinc-100 hover:ring-zinc-700 disabled:cursor-not-allowed disabled:text-zinc-600 disabled:ring-zinc-800/60 disabled:hover:text-zinc-600"

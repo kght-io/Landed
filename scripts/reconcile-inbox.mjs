@@ -6,7 +6,7 @@
 // and DB-only apps inbox missed; alias-map renames; flag low-confidence rows.
 import D from "better-sqlite3";
 import fs from "node:fs";
-import { isTarget } from "../lib/targets.mjs";
+import { isTarget } from "@landed/shared/targets.mjs";
 
 const APPLY = process.argv.includes("--apply");
 // Path to the inbox-audit CSV. Override with INBOX_AUDIT_CSV; defaults to one in the asset root.

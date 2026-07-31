@@ -5,6 +5,9 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // The Next app is one workspace among several — point the plugin at it, or its page/route
+  // detection runs against the repo root and reports phantom "no pages directory" problems.
+  { settings: { next: { rootDir: "apps/web" } } },
   // A leading underscore marks an intentionally-unused binding (a discarded destructure key like
   // `const { targetTitles: _t, ...rest } = c`, an unused arg). Standard convention — opt it out of
   // the unused-vars rule so the discard reads as deliberate instead of firing a warning.
@@ -19,10 +22,10 @@ const eslintConfig = defineConfig([
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
-    ".next/**",
-    "out/**",
+    "**/.next/**",
+    "**/out/**",
     "build/**",
-    "next-env.d.ts",
+    "**/next-env.d.ts",
     // Non-source dirs eslint should never walk. `caddy/` is root-owned (reverse-proxy
     // runtime state) and errors the whole run with EACCES if scanned; `data/` holds the
     // SQLite DB and generated assets. Neither contains lintable source.

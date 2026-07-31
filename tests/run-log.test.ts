@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { runPaths, runDir, splitFrames, isTerminalLine, isAlive } from "@/lib/agents/run-log";
+import { runPaths, runDir, splitFrames, isTerminalLine, isAlive } from "@landed/core/agents/run-log";
 
 // Journal paths must stay inside data/agent-runs and sanitise the type so it can't escape the dir.
 test("runPaths keeps files inside the run dir and sanitises the type", () => {

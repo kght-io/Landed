@@ -3,8 +3,8 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedCandidate, db, jobs } from "./helpers";
-import { createJob, claimJob, claimNext, requeueJob, deleteQueuedJob, listJobs, enqueueFit, reconcileFitQueue, listFitQueue, submitJobResult } from "@/lib/jobs/store";
-import { getPosting } from "@/lib/db/queries";
+import { createJob, claimJob, claimNext, requeueJob, deleteQueuedJob, listJobs, enqueueFit, reconcileFitQueue, listFitQueue, submitJobResult } from "@landed/core/jobs/store";
+import { getPosting } from "@landed/core/db/queries";
 
 beforeEach(reset);
 

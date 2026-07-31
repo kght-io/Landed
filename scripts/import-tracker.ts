@@ -1,13 +1,13 @@
 // Seed the DB from the real tracker.csv. Run: npx tsx scripts/import-tracker.ts
 // Re-run with FORCE=1 to wipe + reimport.
 import fs from "node:fs";
-import { db } from "../lib/db";
-import { companies, postings } from "../lib/db/schema";
+import { db } from "@landed/core/db";
+import { companies, postings } from "@landed/core/db/schema";
 import { eq, sql, inArray } from "drizzle-orm";
-import { PATHS } from "../lib/config";
-import { TRACKER_STAGES } from "../lib/pipeline";
-import { norm } from "../lib/agents/canonical";
-import { isTarget } from "../lib/targets.mjs";
+import { PATHS } from "@landed/core/config";
+import { TRACKER_STAGES } from "@landed/shared/pipeline";
+import { norm } from "@landed/shared/agents/canonical";
+import { isTarget } from "@landed/shared/targets.mjs";
 
 const tierFor = (name: string) =>
   isTarget(norm(name)) ? "tier2" : "tier3";

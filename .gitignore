@@ -1,7 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
+# dependencies (root + every workspace)
 /node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -13,9 +14,9 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# next.js (the app lives in apps/web now)
+/apps/web/.next/
+/apps/web/out/
 
 # production
 /build
@@ -39,7 +40,7 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+apps/web/next-env.d.ts
 
 # local sqlite db
 /data/

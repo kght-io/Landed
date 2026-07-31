@@ -13,9 +13,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { eq, and } from "drizzle-orm";
-import { db } from "../lib/db";
-import { prepQuestions, prepAttempts, prepProgress } from "../lib/db/schema";
-import { norm } from "../lib/agents/canonical";
+import { db } from "@landed/core/db";
+import { prepQuestions, prepAttempts, prepProgress } from "@landed/core/db/schema";
+import { norm } from "@landed/shared/agents/canonical";
 
 type PlanProblem = { id: number; name: string; num?: number; review?: boolean };
 type Plan = { problems: PlanProblem[] }[];

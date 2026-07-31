@@ -7,8 +7,8 @@
 // Idempotent + SAFE: it only ever touches the fictional companies listed below (and their
 // postings) — your real companies/applications are left untouched. Re-running refreshes the demo.
 // Writes to the local gitignored DB only.
-import { db } from "../lib/db";
-import { companies, postings } from "../lib/db/schema";
+import { db } from "@landed/core/db";
+import { companies, postings } from "@landed/core/db/schema";
 import { inArray, eq } from "drizzle-orm";
 
 const NOW = "2026-07-20T12:00:00.000Z";

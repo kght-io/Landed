@@ -1,0 +1,10 @@
+{
+  "name": "@landed/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Client-safe code: domain types, pure logic, and formatting shared by the UI and the server. Must never import node builtins, a DB driver, or @landed/core.",
+  "exports": {
+    "./targets.mjs": "./src/targets.mjs",
+    "./*": "./src/*.ts"
+  }
+}

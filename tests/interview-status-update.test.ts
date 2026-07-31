@@ -3,9 +3,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, db, postings, jobs } from "./helpers";
-import { prepQuestions, prepAttempts, prepCompany } from "@/lib/db/schema";
-import { updateInterviewStatus } from "@/lib/jobs/store";
-import { canonical } from "@/lib/agents/canonical";
+import { prepQuestions, prepAttempts, prepCompany } from "@landed/core/db/schema";
+import { updateInterviewStatus } from "@landed/core/jobs/store";
+import { canonical } from "@landed/shared/agents/canonical";
 
 // reset() (helpers) doesn't touch the prep_* tables — clear them too so profiles don't leak.
 beforeEach(() => {

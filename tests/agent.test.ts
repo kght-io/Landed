@@ -3,9 +3,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, seedCandidate, approveSyncedChanges, db, jobs, postings, events, companies } from "./helpers";
-import { submitJobResult, createJob, claimJob, deleteQueuedJob, listJobs, listFitQueue, enqueueFit, inboxLastSynced, queueStaleWatchlistScans, enqueueDailyInboxSync } from "@/lib/jobs/store";
-import { listPostings, listScannedPostings, upsertCompanies, setWatchlist, listCompanies, listWatchlist, updateApplication, listPendingMatches, addComment, deleteComment, getPosting } from "@/lib/db/queries";
-import { resolvePendingMatch } from "@/lib/agents/reconcile";
+import { submitJobResult, createJob, claimJob, deleteQueuedJob, listJobs, listFitQueue, enqueueFit, inboxLastSynced, queueStaleWatchlistScans, enqueueDailyInboxSync } from "@landed/core/jobs/store";
+import { listPostings, listScannedPostings, upsertCompanies, setWatchlist, listCompanies, listWatchlist, updateApplication, listPendingMatches, addComment, deleteComment, getPosting } from "@landed/core/db/queries";
+import { resolvePendingMatch } from "@landed/core/agents/reconcile";
 
 const find = (company: string, role?: string) =>
   listPostings().find((p) => p.company === company && (role === undefined || p.role === role));

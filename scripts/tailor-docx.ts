@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { applyEdits, visibleText, type Edit } from "@/lib/resume/docx";
+import { applyEdits, visibleText, type Edit } from "@landed/shared/resume/docx";
 
 const DOC = "word/document.xml";
 

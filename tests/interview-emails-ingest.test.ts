@@ -2,8 +2,8 @@ import "./setup";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { reset, seedApp } from "./helpers";
-import { submitJobResult } from "@/lib/jobs/store";
-import { listInterviews, listPendingMatches, upsertInterviews } from "@/lib/db/queries";
+import { submitJobResult } from "@landed/core/jobs/store";
+import { listInterviews, listPendingMatches, upsertInterviews } from "@landed/core/db/queries";
 
 beforeEach(() => reset());
 

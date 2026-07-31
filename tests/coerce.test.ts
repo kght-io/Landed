@@ -5,7 +5,7 @@
 // leaked NaN silently defeats every downstream default. These tests pin that contract.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { num, str } from "@/lib/coerce";
+import { num, str } from "@landed/shared/coerce";
 
 test("num: parses numeric values and numeric strings", () => {
   assert.equal(num(5), 5);

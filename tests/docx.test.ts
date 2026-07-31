@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyEdits, visibleText } from "@/lib/resume/docx";
+import { applyEdits, visibleText } from "@landed/shared/resume/docx";
 
 // Minimal WordprocessingML fixtures. The point of this helper is that Word splits a single visible
 // sentence across several <w:r>/<w:t> runs, so a naive string search on document.xml misses any

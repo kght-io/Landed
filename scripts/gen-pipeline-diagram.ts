@@ -11,8 +11,8 @@
  * Runs in CI on every push (.github/workflows/architecture-diagram.yml) and
  * locally via `npm run diagram:pipeline`.
  */
-import { STATUS_ORDER, type Status } from "../lib/types";
-import { STATUS_LABEL } from "../lib/pipeline";
+import { STATUS_ORDER, type Status } from "@landed/shared/types";
+import { STATUS_LABEL } from "@landed/shared/pipeline";
 import { writeDiagramDoc } from "./diagram-doc";
 
 const START = "[*]";

@@ -3,9 +3,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { reset, seedApp, seedCandidate, db, postings, companies } from "./helpers";
 import { eq } from "drizzle-orm";
-import { interviewNarrowed } from "@/lib/agents/match";
-import type { PostingRow } from "@/lib/db/schema";
-import type { IncomingApp } from "@/lib/agents/types";
+import { interviewNarrowed } from "@landed/shared/agents/match";
+import type { PostingRow } from "@landed/core/db/schema";
+import type { IncomingApp } from "@landed/shared/agents/types";
 
 beforeEach(() => reset());
 
@@ -57,8 +57,8 @@ test("a non-interview email (rejection, fresh applied) is NOT narrowed", () => {
 // --- end to end: the interview posting is the target, prior stages aren't offered -------------
 
 test("an interview email lands on the single interview-stage posting, not the tailoring/applied ones", async () => {
-  const { submitJobResult } = await import("@/lib/jobs/store");
-  const { listPendingMatches } = await import("@/lib/db/queries");
+  const { submitJobResult } = await import("@landed/core/jobs/store");
+  const { listPendingMatches } = await import("@landed/core/db/queries");
   const before = rowsFor("Reddit").length;
   seedCandidate({ company: "Reddit", title: "Senior Software Engineer, Ads", state: "tailoring" });
   seedApp({ company: "Reddit", role: "Growth Engineer", status: "applied" });

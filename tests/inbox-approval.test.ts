@@ -3,9 +3,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, seedCandidate, db, postings, companies } from "./helpers";
-import { submitJobResult } from "@/lib/jobs/store";
-import { listPendingMatches, getPosting } from "@/lib/db/queries";
-import { resolvePendingMatch } from "@/lib/agents/reconcile";
+import { submitJobResult } from "@landed/core/jobs/store";
+import { listPendingMatches, getPosting } from "@landed/core/db/queries";
+import { resolvePendingMatch } from "@landed/core/agents/reconcile";
 
 beforeEach(() => reset());
 
@@ -107,7 +107,7 @@ test("a fresher proposal for the same posting replaces the stale card rather tha
 // --- other sources are untouched by the approval gate -----------------------------------------
 
 test("only inbox-sync needs approval — another source still reconciles directly", async () => {
-  const { reconcile } = await import("@/lib/agents/reconcile");
+  const { reconcile } = await import("@landed/core/agents/reconcile");
   const id = seedCandidate({ company: "Reddit", title: "Senior Software Engineer", state: "tailoring" });
   const out = reconcile([{ company: "Reddit", role: "Senior Software Engineer", status: "applied" }], { actor: "You", source: "manual" });
   assert.equal(out.updated, 1);

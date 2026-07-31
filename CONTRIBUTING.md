@@ -49,8 +49,8 @@ The loop for any behavior change:
 3. **Run `npm run check`** — the whole suite, to catch regressions elsewhere.
 4. **Self-correct until green.** Don't open a PR on a red or unrun signal.
 
-Tests are pure and fast: pure logic (`lib/coerce.ts`, `lib/leveling.ts`, `lib/linediff.ts`)
-and the job queue (`lib/jobs/`) are all directly testable without a live agent — that's most
+Tests are pure and fast: pure logic (`packages/shared/src/coerce.ts`, `leveling.ts`, `linediff.ts`)
+and the job queue (`packages/core/src/jobs/`) are all directly testable without a live agent — that's most
 of the surface area worth a contribution.
 
 `npm run lint` runs as an advisory signal. There's a pre-existing `react-hooks` backlog it
@@ -62,12 +62,12 @@ flags — help burn it down, but don't add to it.
   older releases. Read the relevant guide in `node_modules/next/dist/docs/` before writing app
   or routing code, and heed deprecation notices.
 - **Coerce untyped boundaries.** Agent/JSON results arrive as `unknown`. Run them through
-  [lib/coerce.ts](lib/coerce.ts) (`num` never returns `NaN`; `str` maps empty → `undefined`).
+  [packages/shared/src/coerce.ts](packages/shared/src/coerce.ts) (`num` never returns `NaN`; `str` maps empty → `undefined`).
   Don't hand-roll `Number(x)` on agent input.
 - **Keep the agent brief in sync.** [instructions/README.md](instructions/README.md) is the
   single source of truth that briefs the agent on how the system works — it's consumed by a
   live agent, not just humans. If your change touches MCP tools
-  ([mcp/jobhunt-server.mjs](mcp/jobhunt-server.mjs)), job types/playbooks, the asset layout, or
+  ([apps/mcp/jobhunt-server.mjs](apps/mcp/jobhunt-server.mjs)), job types/playbooks, the asset layout, or
   the run flow, update `instructions/README.md` in the *same* PR. Don't spin up a second doc.
 - **One SQLite DB is the source of truth**, edited by two actors — You (human, via the UI) and
   the agent (via MCP) — and every change is attributed to one of them. Preserve attribution

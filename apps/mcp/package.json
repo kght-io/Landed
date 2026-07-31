@@ -1,0 +1,12 @@
+{
+  "name": "@landed/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-dependency stdio MCP server bridging CoWork to the app. A thin HTTP client over apps/web — it holds no state and never opens the DB.",
+  "bin": {
+    "jobhunt-mcp": "./jobhunt-server.mjs"
+  },
+  "exports": {
+    "./jobhunt-server.mjs": "./jobhunt-server.mjs"
+  }
+}

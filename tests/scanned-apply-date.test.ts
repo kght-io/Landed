@@ -3,7 +3,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, db, postings, seedCandidate } from "./helpers";
-import { scannedAction } from "@/lib/db/queries";
+import { scannedAction } from "@landed/core/db/queries";
 
 beforeEach(() => reset());
 

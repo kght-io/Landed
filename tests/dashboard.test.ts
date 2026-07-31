@@ -2,8 +2,8 @@ import "./setup";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { reset, db, seedApp } from "./helpers";
-import { prepAttempts, prepQuestions } from "@/lib/db/schema";
-import { dashboardStats } from "@/lib/db/dashboard";
+import { prepAttempts, prepQuestions } from "@landed/core/db/schema";
+import { dashboardStats } from "@landed/core/db/dashboard";
 
 // A fixed "now" so the week/month axes are deterministic regardless of when the suite runs.
 // 2026-07-21 is a Tuesday → its Monday-anchored week starts 2026-07-20; its month is 2026-07.

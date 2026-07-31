@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseLeetcodeUrl, prettyCompany, questionTopic } from "@/lib/prep/leetcode";
+import { parseLeetcodeUrl, prettyCompany, questionTopic } from "@landed/shared/prep/leetcode";
 
 test("parseLeetcodeUrl extracts slug + provisional name from problem URLs", () => {
   assert.deepEqual(parseLeetcodeUrl("https://leetcode.com/problems/two-sum/"), { slug: "two-sum", name: "Two Sum" });

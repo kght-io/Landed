@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { autoWorkPlan, AUTO_WORK_THRESHOLD } from "@/lib/agents/autowork";
+import { autoWorkPlan, AUTO_WORK_THRESHOLD } from "@landed/shared/agents/autowork";
 
 const none = () => false;
 

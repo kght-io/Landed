@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldAutoSyncInbox, parseSyncTime, dailySyncJobId, DEFAULT_INBOX_SYNC_TIME } from "@/lib/inbox-schedule";
+import { shouldAutoSyncInbox, parseSyncTime, dailySyncJobId, DEFAULT_INBOX_SYNC_TIME } from "@landed/shared/inbox-schedule";
 
 const at = DEFAULT_INBOX_SYNC_TIME; // 08:00 local
 

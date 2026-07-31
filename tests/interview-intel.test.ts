@@ -6,8 +6,8 @@ import { reset, seedApp, db, jobs } from "./helpers";
 import {
   updateApplication, getPosting,
   addInterviewRound, updateInterviewRound, deleteInterviewRound,
-} from "@/lib/db/queries";
-import { queuePrepResearch } from "@/lib/jobs/store";
+} from "@landed/core/db/queries";
+import { queuePrepResearch } from "@landed/core/jobs/store";
 
 beforeEach(() => reset());
 

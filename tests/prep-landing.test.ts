@@ -5,8 +5,8 @@ import {
   isPastInterviewed,
   nextUpcomingRound,
   nextRoundKindLabel,
-} from "@/lib/prep/landing";
-import type { InterviewRound } from "@/lib/types";
+} from "@landed/shared/prep/landing";
+import type { InterviewRound } from "@landed/shared/types";
 
 test("isActivelyInterviewing is true only for interview/offer", () => {
   assert.equal(isActivelyInterviewing({ status: "interview" }), true);

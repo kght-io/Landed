@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describeChange, describeChanges } from "@/lib/change-format";
+import { describeChange, describeChanges } from "@landed/shared/change-format";
 
 const text = (d: Parameters<typeof describeChange>[0]) => describeChange(d).text;
 

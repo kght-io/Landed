@@ -5,11 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { eq, like } from "drizzle-orm";
 import { reset, seedApp, db, postings, companies, jobs } from "./helpers";
-import { prepQuestions, prepAttempts, prepCompany } from "@/lib/db/schema";
-import { submitJobResult } from "@/lib/jobs/store";
-import { updateApplication } from "@/lib/db/queries";
-import { getCompanyProfile, listQuestions } from "@/lib/db/prep";
-import { PREP_ROOT, questionsDumpedAt } from "@/lib/prep/export-context";
+import { prepQuestions, prepAttempts, prepCompany } from "@landed/core/db/schema";
+import { submitJobResult } from "@landed/core/jobs/store";
+import { updateApplication } from "@landed/core/db/queries";
+import { getCompanyProfile, listQuestions } from "@landed/core/db/prep";
+import { PREP_ROOT, questionsDumpedAt } from "@landed/core/prep/export-context";
 
 function resetPrep() {
   reset();

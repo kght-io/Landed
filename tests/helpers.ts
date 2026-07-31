@@ -1,12 +1,12 @@
 // Test helpers. Imported only AFTER ./setup (which configures DB_PATH/ASSET_ROOT),
-// so the "@/lib/*" imports below bind to the temp DB + temp asset dir.
-import { db } from "@/lib/db";
+// so the "@landed/core/*" imports below bind to the temp DB + temp asset dir.
+import { db } from "@landed/core/db";
 import {
   postings, companies, events, interviews, jobs, appConfig, agentRuns, pendingMatches, todos,
-} from "@/lib/db/schema";
-import type { Status } from "@/lib/types";
-import { listPendingMatches } from "@/lib/db/queries";
-import { resolvePendingMatch } from "@/lib/agents/reconcile";
+} from "@landed/core/db/schema";
+import type { Status } from "@landed/shared/types";
+import { listPendingMatches } from "@landed/core/db/queries";
+import { resolvePendingMatch } from "@landed/core/agents/reconcile";
 
 export { db, postings, companies, events, jobs };
 

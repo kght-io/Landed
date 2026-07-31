@@ -1,8 +1,9 @@
 name: CI
 
 # The automated feedback signal, enforced on every change. Both jobs are hard gates — they must be
-# green to merge. `check` = typecheck + tests; `lint` = eslint (the react-hooks backlog is cleared,
-# so lint now blocks too). A pre-push hook (.githooks/pre-push) runs both locally before every push.
+# green to merge. `check` = typecheck + workspace boundary + tests; `lint` = eslint (the react-hooks
+# backlog is cleared, so lint now blocks too). `npm ci` at the root installs every workspace.
+# A pre-push hook (.githooks/pre-push) runs both locally before every push.
 
 on:
   pull_request:
@@ -11,7 +12,7 @@ on:
 
 jobs:
   check:
-    name: typecheck + tests
+    name: typecheck + boundary + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

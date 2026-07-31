@@ -72,26 +72,26 @@ the biggest drivers of how the app assesses fit:
 
 - **Your search profile** — level baseline, included/excluded disciplines, locations, and the
   candidate résumé the fit/leveling playbooks judge against. Edit it on the **Profile** page
-  (stored per install in the DB). The shipped defaults in [lib/db/profile.ts](lib/db/profile.ts)
-  and [lib/fitlab/seed.ts](lib/fitlab/seed.ts) are generic, fictional placeholders — uploading a
+  (stored per install in the DB). The shipped defaults in [packages/core/src/db/profile.ts](packages/core/src/db/profile.ts)
+  and [packages/shared/src/fitlab/seed.ts](packages/shared/src/fitlab/seed.ts) are generic, fictional placeholders — uploading a
   base résumé (.docx) auto-adopts its text as your Fit Lab profile.
 - **Target companies** — the list that decides whether a newly-seen company starts in the
   "target" vs "practice" tier. It's a single starter list in
-  [lib/targets.mjs](lib/targets.mjs) — edit it for your own search. (You can also re-tier any
+  [packages/shared/src/targets.mjs](packages/shared/src/targets.mjs) — edit it for your own search. (You can also re-tier any
   company in the UI regardless.) The leveling anchor ladder defaults to Amazon's and is
   swappable on the **Settings** page.
 
 ## How the agent fits in
 
 Agentic work runs as a **headless Claude Code agent**, which connects to the app's MCP
-server ([mcp/jobhunt-server.mjs](mcp/jobhunt-server.mjs)) and reads/writes the same SQLite
+server ([apps/mcp/jobhunt-server.mjs](apps/mcp/jobhunt-server.mjs)) and reads/writes the same SQLite
 DB over a set of tools. The brief that tells the agent how the system works, plus one
 playbook per job type, ship in the repo under [`instructions/`](instructions) — so a fresh
 clone can drive the agent out of the box. [`instructions/README.md`](instructions/README.md)
 is the single source of truth for the agent; it's editable both on disk and from the app's
 Guides & reference view (which writes back to the tracked file).
 
-To wire in the MCP server, add `mcp/jobhunt-server.mjs` to the Claude Code runner's MCP
+To wire in the MCP server, add `apps/mcp/jobhunt-server.mjs` to the Claude Code runner's MCP
 config (a project `.mcp.json` or `--mcp-config`); it talks to the running app at
 `JOBHUNT_URL` (default `http://localhost:3000`).
 
@@ -134,6 +134,8 @@ Because launchd owns port 3000, don't also run `npm run dev` by hand while it's 
 | `npm run dev` / `build` / `start` | Next.js dev / production build / serve |
 | `npm run lint` | ESLint |
 | `npm run test` | Node test runner (`tests/*.test.ts`) |
+| `npm run boundary` | Enforce the workspace dependency rules (web → core → shared) |
+| `npm run check` | The gate: typecheck + boundary + tests |
 | `npm run seed:demo` | Populate the DB with realistic fake data (every pipeline stage) — for demos / UI dev |
 | `npm run seed:prep` | Seed the interview-prep catalog |
 | `npm run import:prep` | Import coding-prep progress |
@@ -142,16 +144,30 @@ Because launchd owns port 3000, don't also run `npm run dev` by hand while it's 
 
 ## Project structure
 
+An npm-workspaces monorepo. The frontend and backend are separate packages that run in a single
+`next dev` process — the split is about ownership and enforced dependencies, not deployment.
+
 ```
-app/         Next.js App Router — routes (UI) + /api (server routes)
-components/  React components (pipeline, change feed, prep, …)
-lib/         Domain logic — db (Drizzle schema + queries), jobs, agents, prep
-hooks/       Client data hooks
-mcp/         MCP server exposing the DB to the Claude Code agent
-scripts/     Seeds, imports, backups, diagram generators, the serve wrapper
-docs/        Architecture & pipeline docs (some auto-generated)
-tests/       Node test-runner tests
+apps/
+  web/         @landed/web — Next.js App Router: pages, components, hooks,
+               and the /api route handlers (the only place core meets HTTP)
+  mcp/         @landed/mcp — stdio MCP server exposing the app to the Claude Code agent
+               (zero-dependency; a thin HTTP client over apps/web, it never opens the DB)
+packages/
+  core/        @landed/core — server-only backend: Drizzle schema + queries, the job
+               queue, agent orchestration, on-disk paths. Node-only, never bundled to the browser.
+  shared/      @landed/shared — client-safe: domain types, pure logic, formatting.
+               Imported by both sides; may not touch node builtins or the DB.
+data/          SQLite DB + generated agent artifacts (gitignored)
+instructions/  The CoWork brief + per-job-type playbooks (tracked source)
+scripts/       Seeds, imports, backups, diagram generators, the serve wrapper
+docs/          Architecture & pipeline docs (some auto-generated)
+tests/         Node test-runner tests, run against every workspace
 ```
+
+The dependency arrows are enforced by `npm run boundary` (included in `npm run check`):
+`web → core → shared`, never the reverse. See **The workspace boundary** in
+[AGENTS.md](AGENTS.md) for the rules and where new code belongs.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/pipeline.md](docs/pipeline.md)
 for more.

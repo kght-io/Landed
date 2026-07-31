@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { TEST_DIR } from "./setup";
-import { resolvePrepDir, mdFilesIn, PREP_ROOT } from "@/lib/prep/export-context";
-import { prepChatArgs, baseArgs } from "@/lib/agents/claude-code";
+import { resolvePrepDir, mdFilesIn, PREP_ROOT } from "@landed/core/prep/export-context";
+import { prepChatArgs, baseArgs } from "@landed/core/agents/claude-code";
 
 test("resolvePrepDir: a plain slug resolves inside the interview-prep tree", () => {
   const dir = resolvePrepDir("pendo");

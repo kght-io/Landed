@@ -1,8 +1,13 @@
 /**
  * dependency-cruiser config for the auto-generated architecture diagram.
- * Tuned for a HIGH-LEVEL view: modules are collapsed to one box per
- * second-level folder (e.g. lib/jobs, app/api, components/board) so the
- * diagram shows architecture, not 400 individual files.
+ * Tuned for a HIGH-LEVEL view: modules are collapsed to one box per workspace sub-folder
+ * (e.g. packages/core/src/jobs, apps/web/components) so the diagram shows architecture,
+ * not 400 individual files.
+ *
+ * This file draws PICTURES — it deliberately carries no rules, because `collapse` and
+ * `includeOnly` below would neuter them (collapsed boxes and a graph with node builtins
+ * filtered out can't express "shared must not import fs"). The enforced workspace boundary
+ * lives in .dependency-cruiser-boundary.cjs and runs as `npm run boundary`.
  *
  * Regenerated in CI on every push — see .github/workflows/architecture-diagram.yml
  * Run locally with: npm run diagram:arch
@@ -26,9 +31,9 @@ module.exports = {
       ],
     },
     // Chart only our own source — drops node builtins (fs, path) and deps.
-    includeOnly: "^(app|components|lib|hooks)",
-    // Collapse every module to its top-two path segments -> high-level boxes.
-    collapse: "^(app|components|lib|hooks)/[^/]+",
+    includeOnly: "^(apps|packages)",
+    // Collapse every module to a high-level box: one per workspace sub-folder.
+    collapse: "^(apps/[^/]+/[^/]+|packages/[^/]+/src/[^/]+)",
     tsPreCompilationDeps: true,
     tsConfig: { fileName: "tsconfig.json" },
     enhancedResolveOptions: {

@@ -3,9 +3,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedCandidate, db, postings, jobs } from "./helpers";
-import { submitJobResult, claimJob, enqueueTailoring, requeueRedo, reconcileTailoringQueue, deleteQueuedJob } from "@/lib/jobs/store";
-import { getPosting } from "@/lib/db/queries";
-import { parseRedoLog, hasPendingRedo } from "@/lib/jobs/redolog";
+import { submitJobResult, claimJob, enqueueTailoring, requeueRedo, reconcileTailoringQueue, deleteQueuedJob } from "@landed/core/jobs/store";
+import { getPosting } from "@landed/core/db/queries";
+import { parseRedoLog, hasPendingRedo } from "@landed/shared/jobs/redolog";
 
 beforeEach(reset);
 

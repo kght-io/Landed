@@ -90,14 +90,14 @@ test("a wip job whose lease expired counts as queued — it's abandoned, not in 
 });
 
 test("failures surface newest-first with the error the agent left behind", () => {
-  seedJob({ id: "f1", type: "linkedin-import", status: "failed", createdAt: agoMs(2 * HOUR), error: "boom", attempts: 3 });
+  seedJob({ id: "f1", type: "tailoring", status: "failed", createdAt: agoMs(2 * HOUR), error: "boom", attempts: 3 });
   seedJob({ id: "f2", type: "fit", status: "failed", createdAt: agoMs(30 * 60_000), error: "timeout" });
   seedJob({ id: "ok", status: "ingested" });
 
   const o = opsSnapshot(NOW);
   assert.equal(o.queue.failed, 2);
   assert.deepEqual(o.failures.map((f) => f.id), ["f2", "f1"], "newest first");
-  assert.equal(o.failures[1].type, "linkedin-import");
+  assert.equal(o.failures[1].type, "tailoring");
   assert.equal(o.failures[1].error, "boom");
   assert.equal(o.failures[1].attempts, 3);
 });

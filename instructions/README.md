@@ -122,6 +122,11 @@ without persisting.
 The app reconciles each submission (dedup + the review gate for low-confidence matches) and
 records it in its database. Work one job at a time.
 
+**`inbox-sync` results are proposals, not writes.** Everything a sync derives from mail — a stage
+move, interview rounds, a posting the email implies exists — is parked on the app's **Changes** page
+for the human to approve or reject; nothing lands until they do. Report what the mail actually says
+and let them decide (see `inbox-sync.md`). Every other job type reconciles directly.
+
 **`watchlist-scan`** submits its high/low/drop verdicts via **`submitGlance`** (see
 `watchlist-scan.md`), then closes the job with `submitJobResult(type:"watchlist-scan", jobId,
 records:[])`. It's **one company per job** (`params.company`), queued by the app's Scrape-watchlist
@@ -139,7 +144,8 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
 (The app advances the inbox watermark when it ingests your result — don't set it yourself.)
 
 ## Job types
-- `inbox-sync.md` — read Gmail, update application statuses
+- `inbox-sync.md` — read Gmail, propose application-status changes (the human approves them on
+  the Changes page — an inbox sync never writes to the tracker directly)
 - `watchlist-add.md` — research + configure a company (fetch method, titles), then watchlist it
 - `leveling.md` — fetch a company's levels.fyi ladder (lazy; queued from the fit view's Lvl column)
 - `watchlist-scan.md` — check watchlisted companies' boards for new postings
@@ -173,10 +179,13 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   (JD fallback), and tag each fact + gap `recruiter` | `jd` | `online`. Submit ONE `interview-brief`
   record; each run appends a new version.
 - `interview-emails.md` — **capture** a company's interviewing emails (recruiter outreach, scheduling,
-  what-to-expect, comp) + file attachments into `interview-prep/<slug>/` (`emails.md` + `attachments/`).
-  Queued by the **Pull interview emails** button; searches ~3 months by company, writes the files, and
-  downloads attachments via `downloadGmailAttachments`. **Asset capture only** — it does NOT touch
-  tracker status or rounds (global inbox-sync owns those).
+  what-to-expect, comp) + file attachments into `interview-prep/<slug>/` (`emails.md` + `attachments/`),
+  **and report the structured interview loop** back to the app: per round — who you're meeting, the
+  exact time/duration/zone, the format, the join link, what they said to expect, and their how-to-prepare
+  list. That lands on the posting's rounds and drives the drawer's **Up next** card, so it's readable in
+  the app rather than only in a file. Queued by the **Pull interview emails** button; searches ~3 months
+  by company, writes the files, and downloads attachments via `downloadGmailAttachments`.
+  It does NOT touch application **status** — global inbox-sync owns that.
   - The pipeline's Interviewing view also has a global **Update interview status** button that fans
     this out in one click: a global inbox-sync, then for EVERY interview/offer company it refreshes
     `context.md` on disk, (re)queues this `interview-emails` job, and queues `prep-research` only where

@@ -116,6 +116,9 @@ export type InterviewKind =
   | "final"
   | "other";
 
+// Who you're meeting in a round. `title` is whatever the email signature / scheduling mail gave.
+export type Interviewer = { name: string; title?: string };
+
 export type InterviewRound = {
   id?: number;
   round?: number; // 1-based order within the loop (sort key)
@@ -124,6 +127,18 @@ export type InterviewRound = {
   outcome?: "passed" | "rejected" | "pending"; // pending = scheduled/upcoming
   notes?: string;
   emailId?: string; // Gmail thread id for this round's email (inbox-sync) — enables a direct link
+  // --- the round's substance, captured by `interview-emails` from the scheduling/prep threads.
+  // inbox-sync (the cheap global pass) owns the fields above and leaves these alone; each writer
+  // omits what it doesn't know, and upsertInterviews preserves an omitted field. See the drawer's
+  // "Up next" card, which is entirely built from these.
+  startTime?: string; // local wall-clock "HH:MM" the round starts
+  durationMins?: number;
+  timezone?: string; // as the email stated it ("ET") — not normalized, so it can't be silently wrong
+  interviewers?: Interviewer[];
+  format?: string; // "Zoom video, shared screen" / "audio-only, 20–30 min"
+  joinUrl?: string;
+  whatToExpect?: string; // what they said the round IS — the prose worth reading before it
+  prepNotes?: string[]; // their how-to-prepare list, one item per line
 };
 
 // Gmail thread ids for the email that drove each tracker stage (captured by inbox-sync), so the

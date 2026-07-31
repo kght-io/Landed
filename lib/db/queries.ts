@@ -8,13 +8,25 @@ import { parseRedoLog } from "@/lib/jobs/redolog";
 import { parseBriefs } from "@/lib/jobs/briefs";
 import { isExcludedTitle } from "@/lib/jobs/exclude";
 import type { Leveling } from "@/lib/leveling";
-import type { Comment, EmailRefs, FitAssessment, InterviewKind, InterviewRound, Posting, RedoTurn, Status, Tier } from "@/lib/types";
+import { describeChanges, type DescribedChange, type FieldDiff } from "@/lib/change-format";
+import type { Comment, EmailRefs, FitAssessment, InterviewKind, Interviewer, InterviewRound, Posting, RedoTurn, Status, Tier } from "@/lib/types";
 import type { InterviewRow } from "./schema";
 import type { IncomingApp } from "@/lib/agents/types";
 import { TRACKER_STAGES } from "@/lib/pipeline";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString(); // full ISO — for company audit timestamps
+
+// Parse a JSON column that holds an array, tolerating null/garbage (agent-written data).
+function jsonArray<T>(raw: string | null): T[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) && v.length ? (v as T[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // A stored interview row → the view model. Rounds sort by `round`, then date.
 function toRound(r: InterviewRow): InterviewRound {
@@ -26,6 +38,14 @@ function toRound(r: InterviewRow): InterviewRound {
     outcome: (r.outcome as InterviewRound["outcome"] | null) ?? undefined,
     notes: r.notes ?? undefined,
     emailId: r.emailId ?? undefined,
+    startTime: r.startTime ?? undefined,
+    durationMins: r.durationMins ?? undefined,
+    timezone: r.timezone ?? undefined,
+    interviewers: jsonArray<Interviewer>(r.interviewers),
+    format: r.format ?? undefined,
+    joinUrl: r.joinUrl ?? undefined,
+    whatToExpect: r.whatToExpect ?? undefined,
+    prepNotes: jsonArray<string>(r.prepNotes),
   };
 }
 const roundSort = (a: InterviewRound, b: InterviewRound) =>
@@ -88,7 +108,9 @@ export function listInterviews(appId: number): InterviewRound[] {
 // Idempotently merge incoming rounds into the `interviews` table for one posting. Matches an
 // existing row by `round` number; updates only changed fields, inserts new rounds. Re-syncing the
 // same rounds is a no-op. Returns the number of rows inserted or updated.
-export function upsertInterviews(appId: number, rounds: InterviewRound[]): number {
+// `dryRun` counts what WOULD change without writing — how the approval flow previews "adds 2 rounds"
+// on a change card before you approve it (same comparison, so the preview can't drift from the write).
+export function upsertInterviews(appId: number, rounds: InterviewRound[], opts: { dryRun?: boolean } = {}): number {
   if (!rounds.length) return 0;
   const existing = db.select().from(interviews).where(eq(interviews.applicationId, appId)).all();
   const maxRound = existing.reduce((m, r) => Math.max(m, r.round ?? 0), 0);
@@ -97,6 +119,11 @@ export function upsertInterviews(appId: number, rounds: InterviewRound[]): numbe
   for (const inc of rounds) {
     const roundNo = inc.round ?? ++next;
     const prior = existing.find((r) => (r.round ?? 0) === roundNo);
+    // `inc.X ?? prior.X` throughout: a writer only states what it knows, so an omitted field keeps
+    // what's stored. That's the whole merge contract between the two writers — inbox-sync reports
+    // kind/date/outcome from a cheap global pass, interview-emails reports the round's substance
+    // from a deep per-company read, and neither erases the other by staying silent.
+    const list = (v: unknown[] | undefined, p: string | null) => (v?.length ? JSON.stringify(v) : p ?? null);
     const vals = {
       round: roundNo,
       kind: inc.kind ?? prior?.kind ?? null,
@@ -104,15 +131,24 @@ export function upsertInterviews(appId: number, rounds: InterviewRound[]): numbe
       outcome: inc.outcome ?? prior?.outcome ?? null,
       notes: inc.notes ?? prior?.notes ?? null,
       emailId: inc.emailId ?? prior?.emailId ?? null,
+      startTime: inc.startTime ?? prior?.startTime ?? null,
+      durationMins: inc.durationMins ?? prior?.durationMins ?? null,
+      timezone: inc.timezone ?? prior?.timezone ?? null,
+      interviewers: list(inc.interviewers, prior?.interviewers ?? null),
+      format: inc.format ?? prior?.format ?? null,
+      joinUrl: inc.joinUrl ?? prior?.joinUrl ?? null,
+      whatToExpect: inc.whatToExpect ?? prior?.whatToExpect ?? null,
+      prepNotes: list(inc.prepNotes, prior?.prepNotes ?? null),
     };
     if (prior) {
       // Update only when something actually differs (keeps re-sync a true no-op).
-      if (prior.kind !== vals.kind || prior.date !== vals.date || prior.outcome !== vals.outcome || prior.notes !== vals.notes || prior.emailId !== vals.emailId) {
-        db.update(interviews).set(vals).where(eq(interviews.id, prior.id)).run();
+      const differs = (Object.keys(vals) as (keyof typeof vals)[]).some((k) => prior[k] !== vals[k]);
+      if (differs) {
+        if (!opts.dryRun) db.update(interviews).set(vals).where(eq(interviews.id, prior.id)).run();
         changed++;
       }
     } else {
-      db.insert(interviews).values({ applicationId: appId, ...vals }).run();
+      if (!opts.dryRun) db.insert(interviews).values({ applicationId: appId, ...vals }).run();
       changed++;
     }
   }
@@ -830,6 +866,48 @@ export function createPendingMatch(args: {
   return true;
 }
 
+// Park a change an inbox sync WANTS to make, for you to approve on the Changes page. `postingId` is
+// the posting it would edit, or null when it's proposing a brand-new posting (approve = "new").
+//
+// Keyed on (company, posting, incoming signature) so a daily sync re-proposing the same thing does
+// NOT stack cards — but unlike the other park helpers this REFRESHES a still-pending row instead of
+// bailing: a later sync that learned more (another interview round scheduled) should show you the
+// current proposal, not the stale one you haven't gotten to yet. Returns whether a NEW card
+// appeared, so a refresh doesn't re-announce itself in the run summary.
+export function createPendingChange(args: {
+  actor: string; source: string; companyId: number; companyName: string;
+  rec: IncomingApp; postingId: number | null; diffs: FieldDiff[];
+}): boolean {
+  const signature = `change|${args.postingId ?? "new"}|${matchSignature(args.rec)}`;
+  const payload = JSON.stringify({ rec: args.rec, diffs: args.diffs });
+  const existing = db
+    .select({ id: pendingMatches.id })
+    .from(pendingMatches)
+    .where(and(
+      eq(pendingMatches.companyId, args.companyId),
+      eq(pendingMatches.signature, signature),
+      eq(pendingMatches.status, "pending"),
+    ))
+    .get();
+  if (existing) {
+    db.update(pendingMatches).set({ payload }).where(eq(pendingMatches.id, existing.id)).run();
+    return false;
+  }
+  db.insert(pendingMatches).values({
+    createdAt: new Date().toISOString(),
+    actor: args.actor,
+    source: args.source,
+    companyId: args.companyId,
+    companyName: args.companyName,
+    signature,
+    payload,
+    candidateIds: JSON.stringify(args.postingId == null ? [] : [args.postingId]),
+    kind: "change",
+    status: "pending",
+  }).run();
+  return true;
+}
+
 // Park an "unbound result": a fit/tailor result whose echoed posting `id` didn't resolve. It's an
 // alert for You to look at (resolve = dismiss only), surfaced alongside match approvals. Idempotent
 // on (companyId, signature) so re-submitting the same broken result doesn't stack a duplicate.
@@ -861,11 +939,16 @@ export function enqueueUnboundResult(args: {
 export type PendingMatchView = {
   id: number;
   createdAt: string;
-  kind: "match" | "unbound";
+  kind: "match" | "unbound" | "change";
   companyName: string;
   detail?: string; // unbound: a human-readable "couldn't bind" message
   incoming: { role: string | null; status: string; note: string | null; appliedDate: string | null };
   candidates: { id: number; role: string | null; status: string; appliedDate: string | null }[];
+  // change: what the sync proposes, already in plain English, plus whether approving CREATES the
+  // posting (no candidate to apply onto) and the role line to head the card with.
+  changes?: DescribedChange[];
+  create?: boolean;
+  role?: string | null;
 };
 
 export function listPendingMatches(): PendingMatchView[] {
@@ -889,6 +972,20 @@ export function listPendingMatches(): PendingMatchView[] {
         detail: `the agent's ${u.jobType} result couldn't find posting #${u.declaredId ?? "?"}${u.role ? ` (“${u.role}”)` : ""} — it was skipped.`,
         incoming: { role: u.role, status: `${u.jobType} result`, note: null, appliedDate: null },
         candidates: candidatesOf(ids),
+      };
+    }
+    if (r.kind === "change") {
+      const { rec, diffs } = JSON.parse(r.payload) as { rec: IncomingApp; diffs: FieldDiff[] };
+      const target = ids.length ? byId.get(ids[0]) : undefined;
+      return {
+        id: r.id, createdAt: r.createdAt, kind: "change" as const, companyName: r.companyName,
+        incoming: { role: rec.role ?? null, status: rec.status, note: rec.note ?? null, appliedDate: rec.appliedDate ?? null },
+        candidates: candidatesOf(ids),
+        changes: describeChanges(diffs),
+        create: ids.length === 0,
+        // The posting's own title where there is one — the email's phrasing of the role is often
+        // looser ("Senior SWE (Ads team)") than what you're tracking.
+        role: target?.title ?? rec.role ?? null,
       };
     }
     const rec = JSON.parse(r.payload) as IncomingApp;

@@ -2,9 +2,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { companies, postings } from "@/lib/db/schema";
 import type { CompanyRow, PostingRow } from "@/lib/db/schema";
-import { logEvent, enqueueUnboundResult } from "@/lib/db/queries";
+import { logEvent, enqueueUnboundResult, upsertInterviews } from "@/lib/db/queries";
 import { reconcile } from "@/lib/agents/reconcile";
-import { incomingFromInboxRecords } from "@/lib/agents/sources/inbox";
+import { incomingFromInboxRecords, incomingRounds } from "@/lib/agents/sources/inbox";
 import { canonical, norm } from "@/lib/agents/canonical";
 import { ingestPrepRecords, ingestPrepResearch, ingestLeetcodeAdd, companySlug } from "@/lib/db/prep";
 import { exportPrepContextFor, exportQuestionsFor } from "@/lib/prep/export-context";
@@ -26,7 +26,10 @@ function ingestCandidateUpdates(
   dryRun: boolean | undefined,
   source: string,
   label: string,
-  build: (r: ResultRecord, cand: PostingRow, co: CompanyRow) => { next: Record<string, unknown>; summary: string } | null,
+  // `next` = columns to set on the posting (omit/empty when the result writes elsewhere).
+  // `apply` = a write to another table, run only on a real (non-dry) run — how interview-emails
+  // lands its rounds without inventing a second copy of the id-match + unbound-alert plumbing.
+  build: (r: ResultRecord, cand: PostingRow, co: CompanyRow) => { next?: Record<string, unknown>; summary: string; apply?: () => void } | null,
 ): ReconcileResult {
   const coByKey = new Map<string, CompanyRow>();
   const coById = new Map<number, CompanyRow>();
@@ -82,13 +85,37 @@ function ingestCandidateUpdates(
     if (!built) continue;
     details.push({ action: "update", summary: built.summary });
     if (!dryRun) {
-      db.update(postings).set(built.next).where(eq(postings.id, m.cand.id)).run();
+      if (built.next && Object.keys(built.next).length) db.update(postings).set(built.next).where(eq(postings.id, m.cand.id)).run();
+      built.apply?.();
       logEvent({ actor: "CoWork", source, entity: "company", entityId: m.co.id, action: "update", summary: built.summary });
     }
     updated++;
   }
   const summary = unbound ? `${updated} ${label} · ${unbound} unbound (needs review)` : `${updated} ${label}`;
   return { inserted: 0, updated, fieldChanges: updated, flagged: 0, pending: unbound, newCompanies: 0, summary, details };
+}
+
+// interview-emails record { id, rounds:[...] }: the deep per-company read of the interviewing
+// threads. It still writes emails.md + attachments for agent chat, but the loop itself — who you're
+// meeting, exactly when, the format, what they said to expect, how they said to prepare — now lands
+// on the `interviews` rows so the drawer can show it. Before this it existed only as prose in a file
+// nothing in the app read.
+//
+// Division of labour: inbox-sync (cheap, global, daily) owns stage + kind/date/outcome; this owns
+// the substance. upsertInterviews merges per field, so each writer's silence preserves the other's
+// values — but where this job DOES report a date or outcome it wins, because it read the whole
+// thread rather than classifying one email.
+function ingestInterviewLoop(records: ResultRecord[], dryRun?: boolean): ReconcileResult {
+  return ingestCandidateUpdates(records, dryRun, "interview-emails", "loops captured", (r, cand, co) => {
+    const rounds = incomingRounds(r.rounds ?? r.interviews);
+    if (!rounds?.length) return null; // asset-only run (emails.md written, nothing structured to land)
+    const n = upsertInterviews(cand.id, rounds, { dryRun: true }); // count first — the summary needs it
+    if (!n) return null; // re-capture with nothing new
+    return {
+      summary: `${co.name} — ${cand.title} · ${n} interview round${n === 1 ? "" : "s"} detailed`,
+      apply: () => { upsertInterviews(cand.id, rounds); },
+    };
+  });
 }
 
 // tailoring record { company, role, slug, note }: the agent tailored a resume into resume/<slug>/.
@@ -360,7 +387,9 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     playbook: "inbox-sync.md",
     buildTask: (p) =>
       `Audit my Gmail for job-application emails since ${p?.since ?? "the last sync"} and write the result per inbox-sync.md.`,
-    ingest: (records, dryRun) => reconcile(incomingFromInboxRecords(records), { actor: "CoWork", source: "inbox-sync", dryRun }),
+    // `approval`: an inbox sync never edits the tracker directly — every change it derives from your
+    // mail is parked for you to approve on the Changes page.
+    ingest: (records, dryRun) => reconcile(incomingFromInboxRecords(records), { actor: "CoWork", source: "inbox-sync", dryRun, approval: true }),
   },
   prep: {
     type: "prep",
@@ -415,24 +444,29 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
   "interview-emails": {
     type: "interview-emails",
     title: "Pull interview emails",
-    description: "Capture a company's interview emails (recruiter outreach, scheduling, what-to-expect, comp) + attachments into its interview-prep folder. Asset-only — does NOT touch tracker status (global inbox-sync owns that).",
+    description: "Capture a company's interview emails (recruiter outreach, scheduling, what-to-expect, comp) + attachments into its interview-prep folder, and report the structured interview loop (who · when · format · what to expect) onto the posting. Does NOT touch application status (global inbox-sync owns that).",
     playbook: "interview-emails.md",
+    // Owns the round's SUBSTANCE. See ingestInterviewLoop.
     buildTask: (p) => {
       const slug = p?.slug ?? "<slug>";
       const co = p?.company ?? "the company";
       const since = p?.since ? ` after:${p.since}` : " newer_than:3m";
+      const id = p?.id ?? "<posting id>";
       return (
         `Capture the interviewing emails for ${co} into \`interview-prep/${slug}/\`. searchGmail with a query like ` +
         `\`"${co}"${since}\` (also try the recruiter's domain), read the interviewing-relevant threads via getGmailThread, ` +
         `and WRITE \`interview-prep/${slug}/emails.md\` structured for prep — per round/interviewer: who (name·title·` +
         `LinkedIn from the signature), the format / what-to-expect they described, prep or take-home links, logistics/dates, ` +
         `and any comp figures. For every thread that carries a file (role PDF, prep guide, take-home), call ` +
-        `downloadGmailAttachments(id, "${slug}") to save it into attachments/. This is asset capture only — do NOT change ` +
-        `tracker status or rounds (global inbox-sync owns those). Finish by submitting an empty result via ` +
-        `submitJobResult(type:"interview-emails") with a one-line summary. Follow interview-emails.md.`
+        `downloadGmailAttachments(id, "${slug}") to save it into attachments/. THEN report the loop itself: submit ONE ` +
+        `record via submitJobResult(type:"interview-emails") shaped { id: ${id}, rounds: [...] } — one entry per round, ` +
+        `chronological, with round, kind, date, startTime, durationMins, timezone, format, joinUrl, interviewers ` +
+        `[{name,title}], whatToExpect (prose — what they said the round IS), and prepNotes (their how-to-prepare list). ` +
+        `Omit any field you didn't verify; omitted fields keep what's stored. Do NOT change application status ` +
+        `(global inbox-sync owns that). Follow interview-emails.md.`
       );
     },
-    ingest: noopIngest,
+    ingest: ingestInterviewLoop,
   },
   "peer-comp": {
     type: "peer-comp",

@@ -82,7 +82,7 @@ export default function AutoWorkController() {
           <div className="min-w-0 flex-1">
             <h2 className="text-[15px] font-semibold text-zinc-100">Work {n} queued job{n === 1 ? "" : "s"}?</h2>
             <p className="mt-0.5 text-[13px] text-zinc-400">
-              {n} jobs are queued for the <span className="text-zinc-200">{persona}</span> — more than {AUTO_WORK_THRESHOLD}. Running them all uses that many agent turns. Review and confirm.
+              {n} jobs are queued for the <span className="text-zinc-200">{persona}</span> — more than {AUTO_WORK_THRESHOLD}. Review and confirm.
             </p>
           </div>
           <button onClick={dismiss} className="rounded-lg p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"><X size={18} /></button>

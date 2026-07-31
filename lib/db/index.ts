@@ -338,12 +338,25 @@ function connection() {
   ] as const) {
     if (!candCols.has(name)) sqlite.exec(`ALTER TABLE postings ADD COLUMN ${ddl}`);
   }
-  // interviews gained a per-round Gmail thread id (inbox-sync) for direct email links — add if missing.
+  // interviews gained a per-round Gmail thread id (inbox-sync), then the round's substance captured
+  // by interview-emails (who / when exactly / what to expect) — add whichever are missing.
   {
     const ivCols = new Set(
       (sqlite.prepare("PRAGMA table_info(interviews)").all() as { name: string }[]).map((r) => r.name)
     );
-    if (ivCols.size && !ivCols.has("email_id")) sqlite.exec(`ALTER TABLE interviews ADD COLUMN email_id TEXT`);
+    for (const [name, ddl] of [
+      ["email_id", "email_id TEXT"],
+      ["start_time", "start_time TEXT"],
+      ["duration_mins", "duration_mins INTEGER"],
+      ["timezone", "timezone TEXT"],
+      ["interviewers", "interviewers TEXT"],
+      ["format", "format TEXT"],
+      ["join_url", "join_url TEXT"],
+      ["what_to_expect", "what_to_expect TEXT"],
+      ["prep_notes", "prep_notes TEXT"],
+    ] as const) {
+      if (ivCols.size && !ivCols.has(name)) sqlite.exec(`ALTER TABLE interviews ADD COLUMN ${ddl}`);
+    }
   }
   // ── Indexes ──────────────────────────────────────────────────────────────────────────────
   // postings is the scan firehose (mostly `filtered`); every funnel/board/tracker query scopes

@@ -523,7 +523,9 @@ export function enqueueInterviewEmails(appId: number): { jobId: string; slug: st
     id: `interview-emails-${row.companyId}`,
     type: "interview-emails",
     createdBy: "You",
-    params: { company: p.company, ...(slug ? { slug } : {}), since },
+    // `id` is the posting the captured loop lands on — the job's ingest is ID-only, so without it
+    // the agent has nothing to echo back and its rounds would park as an unbound alert.
+    params: { id: appId, company: p.company, ...(slug ? { slug } : {}), since },
   });
   return { jobId, slug };
 }

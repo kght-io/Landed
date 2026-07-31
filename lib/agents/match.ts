@@ -78,6 +78,23 @@ function fuzzyTitleMatch(recRole: string, title: string): boolean {
   return small.every((t) => bigSet.has(t));
 }
 
+// An incoming record that can only be about an interview you're already in: an `interview` status,
+// interview rounds, or the interviewed flag.
+const isInterviewRec = (rec: IncomingApp): boolean =>
+  rec.status === "interview" || !!rec.interviews?.length || rec.interviewed === true;
+
+// Narrow the pool for an interview email: once a company has a posting sitting in the `interview`
+// stage, THAT (or one of those) is what a scheduling / round / feedback email is about. Searching
+// every prior-stage row too was strictly wrong — it turned an unambiguous email into a fuzzy "which
+// of your 5 Reddit postings?" approval, and could re-point the email at a candidate you hadn't even
+// applied to. Returns the narrowed pool, or null when the rule doesn't apply (not interview-related,
+// or the company has nothing at the interview stage) and the caller should use the full pool.
+export function interviewNarrowed(pool: PostingRow[], rec: IncomingApp): PostingRow[] | null {
+  if (!isInterviewRec(rec)) return null;
+  const inInterview = pool.filter((p) => p.state === "interview");
+  return inInterview.length ? inInterview : null;
+}
+
 // The full decision: exact first; if a role was given but matched nothing exactly, try a FUZZY title
 // match over the `fuzzyStates` subset of the pool (a non-exact hit is never auto-applied — it returns
 // `fuzzy` so the caller raises a human approval). `fuzzyStates` lets the caller restrict fuzzy/ask

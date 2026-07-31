@@ -5,6 +5,8 @@ import {
   postings, companies, events, interviews, jobs, appConfig, agentRuns, pendingMatches, todos,
 } from "@/lib/db/schema";
 import type { Status } from "@/lib/types";
+import { listPendingMatches } from "@/lib/db/queries";
+import { resolvePendingMatch } from "@/lib/agents/reconcile";
 
 export { db, postings, companies, events, jobs };
 
@@ -77,3 +79,19 @@ export function seedCandidate(opts: {
     .get().id;
 }
 
+
+// An inbox sync doesn't write — it parks every change it derived for you to approve on the Changes
+// page (see reconcile's `approval` mode). Tests that care about the RESULT of a sync take the
+// approval hop through this: approve each parked change the way the UI's Approve button does
+// (apply onto the proposed posting, or create it when the sync proposed a new one).
+// Returns how many were approved.
+export function approveSyncedChanges(): number {
+  const pend = listPendingMatches().filter((p) => p.kind === "change");
+  for (const p of pend) {
+    const r = p.create
+      ? resolvePendingMatch(p.id, "new")
+      : resolvePendingMatch(p.id, "apply", p.candidates[0].id);
+    if (!r.ok) throw new Error(`approve failed for pending ${p.id}: ${r.error}`);
+  }
+  return pend.length;
+}

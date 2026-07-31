@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { User, Bot, AlertTriangle, Check, X, Loader2, Search, ChevronRight } from "lucide-react";
+import { User, Bot, AlertTriangle, Check, X, Loader2, Mail, Search, ChevronRight } from "lucide-react";
 import type { Posting } from "@/lib/types";
 import { ago } from "@/lib/format";
 import { actorLabel, sourceLabel } from "@/components/jobMeta";
+import { describeChange, type DescribedChange } from "@/lib/change-format";
 
 type EventView = {
   id: number;
@@ -24,11 +25,15 @@ type Actor = "You" | "CoWork";
 type PendingMatch = {
   id: number;
   createdAt: string;
-  kind: "match" | "unbound";
+  kind: "match" | "unbound" | "change";
   companyName: string;
   detail?: string; // unbound: a "couldn't bind" message
   incoming: { role: string | null; status: string; note: string | null; appliedDate: string | null };
   candidates: { id: number; role: string | null; status: string; appliedDate: string | null }[];
+  // change: what an inbox sync wants to do, already in plain English (see lib/change-format).
+  changes?: DescribedChange[];
+  create?: boolean; // approving creates the posting rather than editing one
+  role?: string | null;
 };
 
 const ACTOR_META: Record<string, { icon: typeof User; cls: string; ring: string }> = {
@@ -99,7 +104,12 @@ function describe(e: EventView): Described {
   }
 
   const label = ACTION_LABEL[e.action] ?? e.action;
-  return { verb: { label, cls: verbCls(label) }, company, role, detail: rest || null };
+  // A field-level event carries the change structurally (field + old + new), so say it in English
+  // rather than echoing the stored shorthand ("status applied→interview", "appliedDate ∅→2026-06-25").
+  const detail = e.field
+    ? describeChange({ field: e.field, old: e.oldValue ?? undefined, new: e.newValue ?? undefined }).text
+    : rest || null;
+  return { verb: { label, cls: verbCls(label) }, company, role, detail };
 }
 
 // Human day label for the sticky group header.
@@ -417,13 +427,30 @@ export default function ChangesView() {
     setBusy(null);
   }
 
-  async function resolveMatch(id: number, decision: "apply" | "new" | "dismiss", appId?: number) {
-    setBusy(`m${id}-${decision}-${appId ?? ""}`);
-    await fetch("/api/match", {
+  const postMatch = (id: number, decision: "apply" | "new" | "dismiss", appId?: number) =>
+    fetch("/api/match", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, decision, appId }),
     });
+
+  async function resolveMatch(id: number, decision: "apply" | "new" | "dismiss", appId?: number) {
+    setBusy(`m${id}-${decision}-${appId ?? ""}`);
+    await postMatch(id, decision, appId);
+    await load();
+    setBusy(null);
+  }
+
+  // Approving a proposed change = running the merge the sync held back; a proposed CREATE has no
+  // posting to merge onto, so it resolves as "new" instead.
+  const approveChange = (m: PendingMatch) =>
+    resolveMatch(m.id, m.create ? "new" : "apply", m.create ? undefined : m.candidates[0]?.id);
+
+  // Approve every proposal in one go. Sequential (each merge reads the row it's about to write) with
+  // a single reload at the end, so the list doesn't flicker item by item.
+  async function approveAllChanges(items: PendingMatch[]) {
+    setBusy("approve-all");
+    for (const m of items) await postMatch(m.id, m.create ? "new" : "apply", m.create ? undefined : m.candidates[0]?.id);
     await load();
     setBusy(null);
   }
@@ -444,6 +471,10 @@ export default function ChangesView() {
   }, [scoped]);
   const filtered = useMemo(() => scoped.filter((e) => matchesType(e, typeFilter)), [scoped, typeFilter]);
   const groups = useMemo(() => groupByDay(filtered), [filtered]);
+  // Changes an inbox sync wants to make (approve/reject) vs. questions it can't answer itself
+  // (which posting is this? / an unbound result). Different asks, so they get their own sections.
+  const proposed = useMemo(() => matches.filter((m) => m.kind === "change"), [matches]);
+  const questions = useMemo(() => matches.filter((m) => m.kind !== "change"), [matches]);
   // Everything awaiting your decision — pinned at the top until resolved.
   const actionCount = matches.length + review.length;
 
@@ -473,15 +504,93 @@ export default function ChangesView() {
               <h2 className="text-sm font-semibold text-zinc-100">Needs your action ({actionCount})</h2>
               <span className="text-[12px] text-zinc-500">pinned until you resolve them</span>
             </div>
+          {/* Proposed by an inbox sync — nothing here has touched your tracker yet. */}
+          {proposed.length > 0 && (
+            <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.04] p-4">
+              <div className="mb-1 flex items-center gap-2 text-emerald-300">
+                <Mail size={15} />
+                <h2 className="text-sm font-semibold">From your inbox ({proposed.length})</h2>
+                <button
+                  onClick={() => approveAllChanges(proposed)}
+                  disabled={!!busy}
+                  className="ml-auto inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[13px] font-medium text-emerald-950 transition enabled:hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {busy === "approve-all" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                  Approve all
+                </button>
+              </div>
+              <p className="mb-3 text-[12px] text-zinc-500">
+                The agent read these out of your email. Nothing is applied until you approve it.
+              </p>
+              <div className="space-y-2.5">
+                {proposed.map((m) => (
+                  <div key={m.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {m.create && (
+                            <span className="mr-1.5 rounded bg-emerald-500/15 px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
+                              New
+                            </span>
+                          )}
+                          {m.companyName}
+                          {m.role && <span className="font-normal text-zinc-400"> — {m.role}</span>}
+                        </p>
+                        <ul className="mt-1.5 space-y-1">
+                          {m.create && (
+                            <li className="text-[13px] text-zinc-300">
+                              <span className="mr-1.5 text-zinc-600">•</span>
+                              Add this posting to your tracker
+                            </li>
+                          )}
+                          {(m.changes ?? []).map((c, i) => (
+                            <li key={i} className="text-[13px] text-zinc-300">
+                              <span className="mr-1.5 text-zinc-600">•</span>
+                              <span className="text-zinc-500">{c.label}:</span>{" "}
+                              {c.from && <span className="text-zinc-500 line-through">{c.from}</span>}
+                              {c.from && <span className="mx-1 text-zinc-600">→</span>}
+                              <span className="font-medium text-zinc-100">{c.to ?? "cleared"}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {m.incoming.note && (
+                          <p className="mt-1.5 line-clamp-2 text-[12px] italic text-zinc-500">“{m.incoming.note}”</p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-col gap-1.5">
+                        <button
+                          onClick={() => approveChange(m)}
+                          disabled={!!busy}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[13px] font-medium text-emerald-950 transition enabled:hover:bg-emerald-400 disabled:opacity-50"
+                        >
+                          {busy === `m${m.id}-${m.create ? "new" : "apply"}-${m.create ? "" : m.candidates[0]?.id ?? ""}` ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => resolveMatch(m.id, "dismiss")}
+                          disabled={!!busy}
+                          className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2.5 py-1.5 text-[13px] font-medium text-zinc-300 transition enabled:hover:bg-zinc-700 disabled:opacity-50"
+                        >
+                          {busy === `m${m.id}-dismiss-` ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Matches + unbound results — pick which posting an incoming change belongs to, or dismiss an alert */}
-          {matches.length > 0 && (
+          {questions.length > 0 && (
             <section className="rounded-2xl border border-sky-500/30 bg-sky-500/[0.04] p-4">
               <div className="mb-3 flex items-center gap-2 text-sky-300">
                 <AlertTriangle size={15} />
-                <h2 className="text-sm font-semibold">Matches &amp; results ({matches.length})</h2>
+                <h2 className="text-sm font-semibold">Matches &amp; results ({questions.length})</h2>
               </div>
               <div className="space-y-2.5">
-                {matches.map((m) => {
+                {questions.map((m) => {
                   const inc = m.incoming;
                   // Unbound result (fit/tailor id-miss): an alert to look at — dismiss only.
                   if (m.kind === "unbound") {

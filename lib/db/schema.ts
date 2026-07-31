@@ -70,6 +70,17 @@ export const interviews = sqliteTable("interviews", {
   outcome: text("outcome"), // passed | rejected | pending
   notes: text("notes"),
   emailId: text("email_id"), // Gmail thread id for this round's email (inbox-sync) — for a direct link
+  // The round's substance, captured by `interview-emails` from the scheduling / prep threads. The
+  // columns above are inbox-sync's (the cheap global pass); these are the deep per-company read's.
+  // Both write through upsertInterviews, which preserves any field the writer omitted.
+  startTime: text("start_time"), // local wall-clock "HH:MM"
+  durationMins: integer("duration_mins"),
+  timezone: text("timezone"), // as the email stated it ("ET")
+  interviewers: text("interviewers"), // JSON [{ name, title? }]
+  format: text("format"), // "Zoom video, shared screen"
+  joinUrl: text("join_url"),
+  whatToExpect: text("what_to_expect"),
+  prepNotes: text("prep_notes"), // JSON string[] — their how-to-prepare list
 });
 
 // Small key-value store for app state (Gmail refresh token, last-sync cursor, …).
@@ -168,11 +179,18 @@ export const pendingMatches = sqliteTable("pending_matches", {
     .notNull()
     .references(() => companies.id),
   companyName: text("company_name").notNull(),
-  signature: text("signature").notNull(), // norm(role)|status|appliedDate — for idempotent re-sync
-  payload: text("payload").notNull(), // JSON: IncomingApp (match) | { jobType, declaredId, record } (unbound)
-  candidateIds: text("candidate_ids").notNull(), // JSON number[] of candidate posting ids (hints for unbound)
+  // Dedup key, namespaced per kind so they can't collide: norm(role)|status|appliedDate (match) ·
+  // change|<postingId|new>|<that> (change) · unbound|<jobType>|<declaredId> (unbound).
+  signature: text("signature").notNull(),
+  // JSON: IncomingApp (match) | { rec: IncomingApp, diffs: FieldDiff[] } (change)
+  //     | { jobType, declaredId, record } (unbound)
+  payload: text("payload").notNull(),
+  // JSON number[] of candidate posting ids (hints for unbound; the single target for a change —
+  // empty when the change PROPOSES the posting, since it doesn't exist yet).
+  candidateIds: text("candidate_ids").notNull(),
   // Action kind: `match` = pick which posting an incoming inbox record belongs to (fuzzy/ambiguous);
-  // `unbound` = a fit/tailor result whose echoed id didn't resolve — an alert to look at (dismiss only).
+  // `unbound` = a fit/tailor result whose echoed id didn't resolve — an alert to look at (dismiss
+  // only); `change` = a change an inbox sync wants to make, held until you approve it.
   kind: text("kind", { enum: PENDING_KINDS }).notNull().default("match"),
   status: text("status", { enum: PENDING_STATUSES })
     .notNull()

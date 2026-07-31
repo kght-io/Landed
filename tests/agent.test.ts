@@ -2,7 +2,7 @@ import "./setup";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
-import { reset, seedApp, seedCandidate, db, jobs, postings, events, companies } from "./helpers";
+import { reset, seedApp, seedCandidate, approveSyncedChanges, db, jobs, postings, events, companies } from "./helpers";
 import { submitJobResult, createJob, claimJob, deleteQueuedJob, listJobs, listFitQueue, enqueueFit, inboxLastSynced, queueStaleWatchlistScans, enqueueDailyInboxSync } from "@/lib/jobs/store";
 import { listPostings, listScannedPostings, upsertCompanies, setWatchlist, listCompanies, listWatchlist, updateApplication, listPendingMatches, addComment, deleteComment, getPosting } from "@/lib/db/queries";
 import { resolvePendingMatch } from "@/lib/agents/reconcile";
@@ -48,11 +48,17 @@ test("fuzzy pool excludes tracker stages — a non-exact 'applied' never re-poin
     records: [{ company: "Reddit", role: "Senior Software Engineer", status: "applied", appliedDate: "2026-06-25" }],
   });
 
-  assert.equal(listPendingMatches().length, 0); // applied row is not a fuzzy candidate
-  assert.equal(redditRows().length, 2); // → inserted a separate posting
+  // The applied row is not a fuzzy candidate, so this is a NEW posting — proposed as a create
+  // (an inbox sync writes nothing unapproved), never offered as "does this belong to the applied row?".
+  const pend = listPendingMatches();
+  assert.equal(pend.length, 1);
+  assert.equal(pend[0].kind, "change");
+  assert.equal(pend[0].create, true);
+  approveSyncedChanges();
+  assert.equal(redditRows().length, 2); // → a separate posting
 });
 
-test("weak title overlap (shared leading word only) is NOT a fuzzy match → inserts new, no approval", () => {
+test("weak title overlap (shared leading word only) is NOT a fuzzy match → a new posting, never a 'which one?'", () => {
   seedCandidate({ company: "Reddit", title: "Senior Data Scientist", state: "tailoring" });
 
   submitJobResult({
@@ -61,7 +67,11 @@ test("weak title overlap (shared leading word only) is NOT a fuzzy match → ins
     records: [{ company: "Reddit", role: "Senior Software Engineer", status: "applied", appliedDate: "2026-06-25" }],
   });
 
-  assert.equal(listPendingMatches().length, 0);
+  const pend = listPendingMatches();
+  assert.equal(pend.length, 1);
+  assert.equal(pend[0].kind, "change");
+  assert.equal(pend[0].create, true, "a create proposal, not a match to the Data Scientist row");
+  approveSyncedChanges();
   assert.equal(redditRows().length, 2);
 });
 
@@ -98,6 +108,7 @@ test("inbox-sync 'applied' matches an existing tailoring candidate and advances 
     records: [{ company: "Reddit", role: "Senior Software Engineer", status: "applied", appliedDate: "2026-06-25" }],
   });
   assert.equal(out.type, "inbox-sync");
+  assert.equal(approveSyncedChanges(), 1);
 
   // Same single Reddit posting — graduated tailoring → applied, resume kept (not a fresh insert).
   const reddit = db.select().from(postings).where(eq(postings.companyId, db.select().from(postings).where(eq(postings.id, id)).get()!.companyId)).all();
@@ -199,6 +210,10 @@ test("submitJobResult(inbox-sync) updates an existing posting, inserts a new one
   });
   assert.equal(out.type, "inbox-sync");
 
+  // A sync proposes; nothing moves until you approve on the Changes page.
+  assert.equal(find("Cursor", "Software Engineer")!.status, "applied", "held pending approval");
+  assert.equal(approveSyncedChanges(), 2, "one update + one new posting to approve");
+
   // existing posting advanced applied → interview, interviewed flag set
   const cursor = find("Cursor", "Software Engineer")!;
   assert.equal(cursor.status, "interview");
@@ -243,9 +258,12 @@ test("ingest is idempotent: re-submitting the same inbox result changes nothing"
   const records = [{ company: "Cursor", role: "Software Engineer", status: "interviewing", interviewed: true }];
 
   submitJobResult({ type: "inbox-sync", jobId: "inbox-a", records });
+  approveSyncedChanges();
   const afterFirst = listPostings();
 
   submitJobResult({ type: "inbox-sync", jobId: "inbox-b", records }); // same payload, fresh job
+  assert.equal(listPendingMatches().length, 0, "nothing left to change → nothing to approve");
+  approveSyncedChanges();
   const afterSecond = listPostings();
 
   assert.equal(afterSecond.length, afterFirst.length, "no duplicate postings");
@@ -278,6 +296,7 @@ test("inbox-sync extracts interview rounds onto a posting, idempotently and addi
     }],
   });
 
+  approveSyncedChanges();
   let cursor = find("Cursor", "Software Engineer")!;
   assert.equal(cursor.status, "interview");
   assert.equal(cursor.interviewed, true, "rounds imply interviewed");
@@ -293,6 +312,7 @@ test("inbox-sync extracts interview rounds onto a posting, idempotently and addi
       { round: 2, kind: "technical", date: "2026-06-20", outcome: "pending" },
     ],
   }] });
+  approveSyncedChanges();
   cursor = find("Cursor", "Software Engineer")!;
   assert.equal(cursor.interviews?.length, 2, "re-sync did not duplicate rounds");
 
@@ -304,6 +324,7 @@ test("inbox-sync extracts interview rounds onto a posting, idempotently and addi
       { round: 3, kind: "onsite", date: "2026-06-28", outcome: "pending" },
     ],
   }] });
+  approveSyncedChanges();
   cursor = find("Cursor", "Software Engineer")!;
   assert.equal(cursor.interviews?.length, 3, "round 3 added");
   assert.equal(cursor.interviews?.find((r) => r.round === 2)?.outcome, "passed", "round 2 outcome updated in place");

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, XCircle, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Coins, Target, ArrowRightCircle, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle } from "lucide-react";
+import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, XCircle, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Coins, Target, ArrowRightCircle, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle, ChevronRight } from "lucide-react";
 import type { BriefGap, InterviewBrief, InterviewRound, Posting, RedoTurn, SourcedText, Status, Tier } from "@/lib/types";
 import { reapplyInfo, STATUS_LABEL, STATUS_CHIP, TIER_META, TIERS } from "@/lib/pipeline";
+import { nextRound, roundWhen, hasDetail } from "@/lib/interview-loop";
 import { type CompanyAgg } from "@/lib/board";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import { tailorDiffFor } from "@/lib/jobs/redolog";
@@ -92,9 +93,110 @@ const KIND_LABEL: Record<string, string> = {
   hiring_manager: "Hiring manager", final: "Final", other: "Interview",
 };
 
-// The interview-stage timeline: one node per round (kind · date), an outcome dot, and a highlight
-// on the current/upcoming round (the first one still `pending`). Read from posting.interviews.
+// Who you're meeting, as a line of "Name · Title" chips.
+function Interviewers({ people }: { people: NonNullable<InterviewRound["interviewers"]> }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {people.map((who, i) => (
+        <span key={i} className="inline-flex items-center gap-1 rounded-md bg-zinc-800/70 px-1.5 py-0.5 text-[12px] text-zinc-300">
+          <Users size={11} className="text-zinc-500" />
+          {who.name}
+          {who.title && <span className="text-zinc-500">· {who.title}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Everything `interview-emails` captured about one round, below its headline. Each block renders
+// only if that piece was actually captured, so a thin round degrades to nothing rather than to a
+// column of "—". Before this the same content existed only as prose in emails.md, which no screen read.
+function RoundDetail({ r }: { r: InterviewRound }) {
+  const [showPrep, setShowPrep] = useState(false);
+  return (
+    <div className="mt-2 space-y-2">
+      {r.interviewers?.length ? <Interviewers people={r.interviewers} /> : null}
+      {r.format && <p className="text-[12px] text-zinc-500">{r.format}</p>}
+      {r.whatToExpect && (
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">What to expect</p>
+          <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-zinc-300">{r.whatToExpect}</p>
+        </div>
+      )}
+      {r.prepNotes?.length ? (
+        <div>
+          <button
+            onClick={() => setShowPrep((v) => !v)}
+            className="inline-flex items-center gap-1 text-[12px] font-medium text-zinc-400 transition hover:text-zinc-200"
+          >
+            <ChevronRight size={12} className={`transition ${showPrep ? "rotate-90" : ""}`} />
+            How to prepare ({r.prepNotes.length})
+          </button>
+          {showPrep && (
+            <ul className="mt-1 space-y-1 pl-4">
+              {r.prepNotes.map((n, i) => (
+                <li key={i} className="text-[13px] leading-relaxed text-zinc-400">
+                  <span className="mr-1.5 text-zinc-600">•</span>{n}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+      {r.notes && <p className="text-[12px] leading-relaxed text-zinc-500">{r.notes}</p>}
+    </div>
+  );
+}
+
+// The pinned "Up next" card for an interviewing posting: which round is coming, exactly when, who's
+// on it, a join button, and what they said to expect. Falls back to the bare headline when the loop
+// hasn't been captured in detail yet.
+function UpNext({ p, rounds }: { p: Posting; rounds: InterviewRound[] }) {
+  const cur = nextRound(rounds);
+  const idx = cur ? rounds.findIndex((r) => r === cur) : -1;
+  const headline = rounds.length ? `Round ${(idx >= 0 ? idx : rounds.length - 1) + 1} of ${rounds.length}` : "Interviewing";
+  return (
+    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[15px] font-semibold text-emerald-200">{headline}</span>
+        {p.status === "offer" && <Chip tone="emerald">offer</Chip>}
+        {cur?.joinUrl && (
+          <a
+            href={cur.joinUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2 py-1 text-[12px] font-medium text-emerald-950 transition hover:bg-emerald-400"
+          >
+            <ExternalLink size={11} /> Join
+          </a>
+        )}
+      </div>
+      {cur ? (
+        <>
+          <p className="mt-1 text-[13px] text-zinc-300">
+            Up next: <span className="font-medium text-zinc-100">{KIND_LABEL[cur.kind ?? "other"]}</span>
+            <span className="text-zinc-500"> · {roundWhen(cur)}</span>
+          </p>
+          {hasDetail(cur) ? <RoundDetail r={cur} /> : (
+            <p className="mt-1.5 text-[12px] text-zinc-500">
+              No detail captured yet — Pull interview emails to fill in who, the format, and what to expect.
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="mt-1 text-[13px] text-zinc-300">
+          {rounds.length ? "All scheduled rounds done — awaiting outcome." : "No rounds scheduled yet — Sync Inbox to pull them in."}
+        </p>
+      )}
+      {p.appliedDate && <p className="mt-1.5 text-[12px] text-zinc-500">Applied {p.appliedDate}</p>}
+    </div>
+  );
+}
+
+// The interview-stage timeline: one node per round (kind · when), an outcome dot, and a highlight on
+// the current/upcoming round. A round that carries captured detail expands to show it.
 function RoundsTimeline({ rounds }: { rounds: InterviewRound[] }) {
+  const [open, setOpen] = useState<number | null>(null);
   if (!rounds.length) {
     return (
       <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-4 text-center text-[13px] text-zinc-600">
@@ -102,26 +204,34 @@ function RoundsTimeline({ rounds }: { rounds: InterviewRound[] }) {
       </p>
     );
   }
-  const currentIdx = rounds.findIndex((r) => (r.outcome ?? "pending") === "pending");
+  const cur = nextRound(rounds);
   return (
     <ol className="relative ml-1 space-y-3 border-l border-zinc-800 pl-4">
       {rounds.map((r, i) => {
         const outcome = r.outcome ?? "pending";
-        const current = i === currentIdx;
+        const current = r === cur;
         const Icon = outcome === "passed" ? CheckCircle2 : outcome === "rejected" ? XCircle : Circle;
         const tone = outcome === "passed" ? "text-emerald-400" : outcome === "rejected" ? "text-rose-300" : current ? "text-amber-300" : "text-zinc-600";
+        const expandable = hasDetail(r);
+        const expanded = open === i;
         return (
           <li key={r.id ?? i} className="relative">
             <span className="absolute -left-[22px] top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-950">
               <Icon size={14} className={tone} />
             </span>
             <div className={`rounded-lg px-2.5 py-1.5 ${current ? "bg-amber-500/10 ring-1 ring-inset ring-amber-500/25" : ""}`}>
-              <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!expandable}
+                onClick={() => setOpen(expanded ? null : i)}
+                className="flex w-full items-center gap-2 text-left disabled:cursor-default"
+              >
+                {expandable && <ChevronRight size={12} className={`shrink-0 text-zinc-500 transition ${expanded ? "rotate-90" : ""}`} />}
                 <span className="text-[13px] font-medium text-zinc-200">{KIND_LABEL[r.kind ?? "other"] ?? "Interview"}</span>
                 {current && <span className="rounded bg-amber-500/20 px-1.5 text-[11px] font-medium text-amber-300">{r.date ? "upcoming" : "current"}</span>}
-                {r.date && <span className="ml-auto text-[12px] tabular-nums text-zinc-500">{r.date}</span>}
-              </div>
-              {r.notes && <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500">{r.notes}</p>}
+                <span className="ml-auto text-[12px] tabular-nums text-zinc-500">{roundWhen(r)}</span>
+              </button>
+              {expanded ? <RoundDetail r={r} /> : r.notes && !expandable ? <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500">{r.notes}</p> : null}
             </div>
           </li>
         );
@@ -677,25 +787,7 @@ function StageHighlight({ p, col, rounds, reapply, isCurrent = true }: { p: Post
       </div>
     );
   }
-  if (col === "interviewing") {
-    const curIdx = rounds.findIndex((r) => (r.outcome ?? "pending") === "pending");
-    const cur = curIdx >= 0 ? rounds[curIdx] : null;
-    const headline = rounds.length ? `Round ${(curIdx >= 0 ? curIdx : rounds.length - 1) + 1} of ${rounds.length}` : "Interviewing";
-    return (
-      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-[15px] font-semibold text-emerald-200">{headline}</span>
-          {p.status === "offer" && <Chip tone="emerald">offer</Chip>}
-        </div>
-        <p className="mt-1 text-[13px] text-zinc-300">
-          {cur
-            ? <>Up next: <span className="font-medium text-zinc-100">{KIND_LABEL[cur.kind ?? "other"]}</span>{cur.date ? <span className="text-zinc-500"> · {cur.date}</span> : null}</>
-            : rounds.length ? "All scheduled rounds done — awaiting outcome." : "No rounds scheduled yet — Sync Inbox to pull them in."}
-        </p>
-        {p.appliedDate && <p className="mt-1 text-[12px] text-zinc-500">Applied {p.appliedDate}</p>}
-      </div>
-    );
-  }
+  if (col === "interviewing") return <UpNext p={p} rounds={rounds} />;
   if (col === "closed") {
     const ended = daysLabel(relDays(p.updatedAt ?? p.appliedDate));
     const furthest = [...rounds].reverse().find((r) => r.outcome && r.outcome !== "pending");

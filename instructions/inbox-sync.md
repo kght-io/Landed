@@ -133,3 +133,24 @@ the job's id (omit for a self-initiated run), and `records` = one object per app
 - One record per application attempt (don't merge re-applies).
 
 The app records the job and advances the inbox watermark automatically — no `done/` move.
+
+## What happens to your result (the approval boundary)
+
+**Nothing you report edits the tracker directly.** Email is inference — you're reading intent out of
+prose — so the app turns every change your result implies into a *proposal* parked on the **Changes**
+page, where the human approves or rejects each one. Approving runs the same merge the app held back;
+rejecting leaves the posting untouched.
+
+Two consequences for how you report:
+
+- **Report what the mail says, not what you think the tracker should end up as.** A human reads each
+  proposal as a sentence ("Stage: Applied → Interviewing", "Adds 2 interview rounds"), so precise,
+  minimal records read well and speculative ones are obvious — and get rejected.
+- **Re-syncing is safe and expected.** A proposal that's still pending is *refreshed* by a later sync
+  (learning about a third round updates the existing card rather than stacking a second one), and a
+  change that's already been approved produces nothing on the next run.
+
+Interview mail is matched against the postings already **in the interview stage** for that company —
+if the human is interviewing at Acme, a scheduling email lands there rather than being offered
+against every earlier-stage Acme posting. Keep `company` canonical and `role` as close to the
+tracker's title as the email lets you; that's what makes the match unambiguous.

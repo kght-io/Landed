@@ -2,11 +2,12 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { companies, postings, pendingMatches } from "@/lib/db/schema";
 import type { PostingRow, CompanyRow } from "@/lib/db/schema";
-import { logEvent, createPendingMatch, upsertInterviews } from "@/lib/db/queries";
+import { logEvent, createPendingMatch, createPendingChange, upsertInterviews } from "@/lib/db/queries";
+import type { FieldDiff } from "@/lib/change-format";
 import { TRACKER_STAGES } from "@/lib/pipeline";
 import { maybeQueuePrepResearch } from "@/lib/jobs/store";
 import { canonical, defaultTier } from "./canonical";
-import { matchPosting } from "./match";
+import { matchPosting, interviewNarrowed, type MatchResult } from "./match";
 import type { IncomingApp, ReconcileResult } from "./types";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -43,15 +44,20 @@ const rank = (s?: string | null) => STATUS_RANK[s ?? ""] ?? 0;
 // Matching now lives in ./match (matchPosting / exactMatch / fuzzy tier) — one shared decision for
 // every ingest path. reconcile() calls it below with MATCH_STAGES (exact) + FUZZY_STAGES (ask).
 
-// Apply an incoming record onto a matched posting: take-latest descriptive fields, advance
-// (never regress) status, monotonic interviewed, fill blank appliedDate. Mutates `match` in place.
-function applyIncoming(
-  match: PostingRow,
-  rec: IncomingApp,
-  opts: { actor: string; source: string; companyName: string }
-): { diffs: string[]; summary: string } {
+// What an incoming record WOULD do to a matched posting: take-latest descriptive fields, advance
+// (never regress) status, monotonic interviewed, fill blank appliedDate, merge Gmail thread ids.
+// Pure w.r.t. the DB — it only reads — so the approval flow can show you the exact change before it
+// happens and `applyIncoming` can then perform precisely that. One computation, two uses: a preview
+// can never drift from the write.
+export function planIncoming(match: PostingRow, rec: IncomingApp): {
+  changes: Record<string, unknown>;
+  fieldDiffs: FieldDiff[];
+  roundsChanged: number;
+  emailChanged: boolean;
+  empty: boolean;
+} {
   const changes: Record<string, unknown> = {};
-  const fieldDiffs: { field: string; old?: string; new?: string }[] = [];
+  const fieldDiffs: FieldDiff[] = [];
   const str = (v: unknown) => (blank(v) ? undefined : String(v));
   const note = (field: string, oldV: unknown, newV: unknown) => fieldDiffs.push({ field, old: str(oldV), new: str(newV) });
 
@@ -71,8 +77,9 @@ function applyIncoming(
   if ((rec.interviewed || rec.interviews?.length) && !match.interviewed) { changes.interviewed = true; note("interviewed", "no", "yes"); }
   if (blank(match.appliedDate) && !blank(rec.appliedDate)) { changes.appliedDate = rec.appliedDate; note("appliedDate", undefined, rec.appliedDate); }
 
-  // Upsert interview rounds (idempotent). Counts as a change even when no posting field moved.
-  const roundsChanged = rec.interviews?.length ? upsertInterviews(match.id, rec.interviews) : 0;
+  // Interview rounds, counted against what's stored (dry — the write happens in applyIncoming).
+  // Counts as a change even when no posting field moved.
+  const roundsChanged = rec.interviews?.length ? upsertInterviews(match.id, rec.interviews, { dryRun: true }) : 0;
   if (roundsChanged) note("interviews", undefined, `${roundsChanged} round${roundsChanged === 1 ? "" : "s"}`);
 
   // Merge captured Gmail thread ids per stage onto the posting (link metadata — no event/diff noise).
@@ -83,8 +90,21 @@ function applyIncoming(
     if (JSON.stringify(merged) !== JSON.stringify(cur)) { changes.emailRefs = JSON.stringify(merged); emailChanged = true; }
   }
 
+  return { changes, fieldDiffs, roundsChanged, emailChanged, empty: !fieldDiffs.length && !roundsChanged && !emailChanged };
+}
+
+// Perform the planned change: write it, log one event per field, return the terse diff strings the
+// run summary quotes. Mutates `match` in place so later records in the same run see the new values.
+function applyIncoming(
+  match: PostingRow,
+  rec: IncomingApp,
+  opts: { actor: string; source: string; companyName: string }
+): { diffs: string[]; summary: string } {
+  const { changes, fieldDiffs, roundsChanged, empty } = planIncoming(match, rec);
+  if (roundsChanged) upsertInterviews(match.id, rec.interviews!); // the real write the plan counted
+
   const diffs = fieldDiffs.map((d) => `${d.field} ${d.old ?? "∅"}→${d.new ?? "∅"}`);
-  if (!diffs.length && !roundsChanged && !emailChanged) return { diffs, summary: "" };
+  if (empty) return { diffs, summary: "" };
   const prevStage = match.state;
   changes.updatedAt = rec.updatedAt ?? today();
   db.update(postings).set(changes as Partial<typeof postings.$inferInsert>).where(eq(postings.id, match.id)).run();
@@ -144,15 +164,26 @@ function resolveCompany(key: string, name: string, actor: string, source: string
   };
 }
 
+// The fields worth naming on a "create this posting" card. The stage plus how you applied — enough
+// to judge the proposal without reproducing the whole row.
+const CREATE_PREVIEW: (keyof IncomingApp)[] = ["status", "level", "team", "location", "channel", "source", "appliedDate", "url"];
+const previewOfNew = (rec: IncomingApp): FieldDiff[] =>
+  CREATE_PREVIEW.filter((f) => !blank(rec[f])).map((f) => ({ field: f, new: String(rec[f]) }));
+
 // Incrementally merge normalized records into the DB. Idempotent: re-running the
 // same input produces no changes. Returns a summary and logs per-row events.
 // Ambiguous matches (2+ postings) are NOT guessed — they're parked in pending_matches
 // for the user to resolve, leaving the posting rows untouched.
+//
+// `approval` (set for inbox-sync) holds back EVERY write: a confident match becomes a proposed
+// change and a brand-new posting becomes a proposed create, both parked for you to approve on the
+// Changes page. Email is inference — the agent reads intent out of prose — so nothing it concludes
+// edits your tracker unattended. Other sources (your own edits, discovery) reconcile directly.
 export function reconcile(
   records: IncomingApp[],
-  opts: { actor: string; source: string; dryRun?: boolean }
+  opts: { actor: string; source: string; dryRun?: boolean; approval?: boolean }
 ): ReconcileResult {
-  const { actor, source, dryRun } = opts;
+  const { actor, source, dryRun, approval } = opts;
   let inserted = 0, updated = 0, fieldChanges = 0, flagged = 0, pending = 0, newCompanies = 0;
   const details: { action: string; summary: string }[] = [];
 
@@ -178,9 +209,28 @@ export function reconcile(
         .where(and(eq(postings.companyId, co.id), inArray(postings.state, MATCH_STAGES))).all();
 
       for (const rec of g.recs) {
-        const res = matchPosting(pool, rec, { fuzzyStates: FUZZY_STAGES });
+        // An interview email is about a posting you're already interviewing for — match it against
+        // those rows alone (see interviewNarrowed). A single one is the answer outright; several
+        // still go through the normal decision, just over the interview rows.
+        const narrowed = interviewNarrowed(pool, rec);
+        const res: MatchResult = narrowed
+          ? (narrowed.length === 1 ? { kind: "unique", app: narrowed[0] } : matchPosting(narrowed, rec, { fuzzyStates: FUZZY_STAGES }))
+          : matchPosting(pool, rec, { fuzzyStates: FUZZY_STAGES });
 
         if (res.kind === "none") {
+          if (approval) {
+            // Propose the new posting instead of creating it. No `pool.push` — the row doesn't
+            // exist yet, so a second record for the same role this run proposes against the same
+            // signature and dedups in createPendingChange rather than double-creating on approval.
+            if (createPendingChange({
+              actor, source, companyId: co.id, companyName: co.name,
+              rec, postingId: null, diffs: previewOfNew(rec),
+            })) {
+              pending++;
+              details.push({ action: "flag", summary: `${co.name} — ${rec.role ?? "?"} · new posting, awaiting your approval` });
+            }
+            continue;
+          }
           const { row, action, summary } = insertIncoming(co, rec, { actor, source });
           pool.push(row);
           inserted++;
@@ -205,7 +255,19 @@ export function reconcile(
           continue;
         }
 
-        // unique → auto-apply
+        // unique → apply it, or (approval mode) propose exactly what it would do and stop there.
+        if (approval) {
+          const plan = planIncoming(res.app, rec);
+          if (plan.empty) continue; // nothing to decide — a re-sync that changes nothing stays silent
+          if (createPendingChange({
+            actor, source, companyId: co.id, companyName: co.name,
+            rec, postingId: res.app.id, diffs: plan.fieldDiffs,
+          })) {
+            pending++;
+            details.push({ action: "flag", summary: `${co.name} — ${res.app.title ?? rec.role ?? "?"} · ${plan.fieldDiffs.length} change${plan.fieldDiffs.length === 1 ? "" : "s"}, awaiting your approval` });
+          }
+          continue;
+        }
         const { diffs, summary } = applyIncoming(res.app, rec, { actor, source, companyName: co.name });
         if (diffs.length) {
           updated++;
@@ -225,13 +287,21 @@ export function reconcile(
     if (!(e as { __dryrun?: boolean })?.__dryrun) throw e;
   }
 
-  const summary = `${inserted} new · ${updated} updated (${fieldChanges} fields) · ${flagged} flagged · ${pending} to match · ${newCompanies} new companies`;
+  // In approval mode nothing was written, so a "0 new · 0 updated" line would read as "the sync found
+  // nothing" when it actually found plenty and is waiting on you. Say what's true instead.
+  const summary = approval
+    ? (pending === 0
+        ? `nothing new — no changes to approve${newCompanies ? ` · ${newCompanies} new companies` : ""}`
+        : `${pending} to approve on the Changes page${newCompanies ? ` · ${newCompanies} new companies` : ""}`)
+    : `${inserted} new · ${updated} updated (${fieldChanges} fields) · ${flagged} flagged · ${pending} to match · ${newCompanies} new companies`;
   return { inserted, updated, fieldChanges, flagged, pending, newCompanies, summary, details };
 }
 
-// Resolve a parked ambiguous match once the user picks. "apply" merges the incoming
-// record onto the chosen posting (actor=You — the human's call is the truth);
-// "new" inserts it as a fresh posting; "dismiss" drops it.
+// Resolve a parked item once the user decides. "apply" merges the incoming record onto the chosen
+// posting (actor=You — the human's call is the truth); "new" inserts it as a fresh posting;
+// "dismiss" drops it. Covers both parked kinds: an ambiguous `match` (which posting is this?) and a
+// `change` an inbox sync proposed (approve this?) — both carry the same IncomingApp payload, so
+// approving is just running the merge the sync held back.
 export function resolvePendingMatch(
   id: number,
   decision: "apply" | "new" | "dismiss",
@@ -252,7 +322,11 @@ export function resolvePendingMatch(
   // Unbound results (fit/tailor id-miss) are alerts — there's no IncomingApp to apply. Dismiss only.
   if (row.kind === "unbound") return { ok: false, error: "unbound result: dismiss only" };
 
-  const rec = JSON.parse(row.payload) as IncomingApp;
+  // A `change` row wraps the record alongside the diff it was proposing; a `match` row is the bare
+  // record. Either way what gets applied is the IncomingApp, re-planned against the posting as it
+  // stands NOW — so a proposal you sat on can't apply a change the row has since outgrown.
+  const payload = JSON.parse(row.payload) as IncomingApp | { rec: IncomingApp; diffs: FieldDiff[] };
+  const rec = (row.kind === "change" ? (payload as { rec: IncomingApp }).rec : payload) as IncomingApp;
   if (decision === "apply") {
     if (!appId) return { ok: false, error: "appId required" };
     const candidateIds = JSON.parse(row.candidateIds) as number[];

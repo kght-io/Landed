@@ -4,7 +4,7 @@ import path from "node:path";
 import mammoth from "mammoth";
 import { PATHS } from "@landed/core/config";
 import { getProfile, setProfile } from "@landed/core/fitlab/store";
-import { PROFILE_SEED } from "@landed/shared/fitlab/seed";
+import { PROFILE_SEED } from "@landed/core/fitlab/seed";
 
 export const dynamic = "force-dynamic";
 

@@ -3,13 +3,18 @@ import { db } from "../db";
 import { fitCriteria, fitRuns, fitVerdicts } from "../db/schema";
 import type { FitVerdictRow } from "../db/schema";
 import { getConfig, setConfig } from "../db/config-store";
-import { decide } from "@landed/shared/fitlab/decide";
-import { STARTER_CRITERIA, PROFILE_SEED, PROFILE_CONFIG_KEY } from "@landed/shared/fitlab/seed";
-import { FITLAB_MODEL, PROMPT_VERSION, normalizeVerdict, type FitRecord } from "@landed/shared/fitlab/task";
-import type { Criterion, CriterionType, Run, StageTrace, Verdict, VerdictRow } from "@landed/shared/fitlab/types";
+import { decide } from "./decide";
+import { STARTER_CRITERIA, PROFILE_SEED, PROFILE_CONFIG_KEY } from "./seed";
+import type { Criterion, CriterionType, Run, StageTrace, Verdict, VerdictRow } from "./types";
 
-// The Fit Lab DATA layer — pure DB + the deterministic Decide. Imports nothing from lib/jobs (so the
-// registry can import the ingest without a cycle). The LLM work happens in the agent (see task.ts/queue.ts).
+// The fit-labeling EVAL STORE — the rubric, the accumulated runs/verdicts, and the human labels that
+// are the eval set, plus the deterministic Decide over them. Backend-only (server-side DB access), so
+// nothing here ships to the browser.
+//
+// The standalone Fit Lab that WROTE this data (the /fit-lab page and the `fitlab-assess` job) is gone;
+// what survives is the data layer and its read/label surface, so the labels stay queryable while fit
+// itself is redesigned. There is deliberately no ingest path right now — whatever replaces it should
+// come from the live pipeline, not a side lab.
 
 const now = () => new Date().toISOString();
 
@@ -62,54 +67,6 @@ function assembleRun(runId: number): Run {
     createdAt: r.createdAt, verdicts,
   };
 }
-
-// Create the run row up front (pending — no verdicts yet). The Fit Lab page polls this id while the agent
-// works the queued job; the ingest fills in the verdicts. Returns the new run id.
-export function createPendingRun(input: { postingId?: number | null; company: string; role: string; jd: string }): number {
-  const run = db.insert(fitRuns).values({
-    postingId: input.postingId ?? null, company: input.company, role: input.role, jd: input.jd,
-    model: FITLAB_MODEL, promptVersion: PROMPT_VERSION, score: null, decision: null,
-    stages: JSON.stringify([]), createdAt: now(),
-  }).returning().get();
-  return run.id;
-}
-
-// Fill a pending run with the agent's submitted verdicts (idempotent — replaces any prior verdicts for the
-// run, so a redo is clean), then derive the trace stages + decision. This is what the job ingest calls.
-export function ingestVerdicts(runId: number, records: FitRecord[]): Run | null {
-  const run = db.select().from(fitRuns).where(eq(fitRuns.id, runId)).get();
-  if (!run) return null;
-  const criteria = listCriteria();
-  const byKey = new Map(criteria.map((c) => [c.key, c]));
-
-  db.delete(fitVerdicts).where(eq(fitVerdicts.runId, runId)).run();
-  const requirements: Record<string, string> = {};
-  for (const rec of records) {
-    const c = byKey.get(rec.criterionKey);
-    if (!c) continue; // unknown criterion key → skip
-    requirements[rec.criterionKey] = rec.requirement ?? "";
-    db.insert(fitVerdicts).values({
-      runId, criterionKey: rec.criterionKey, requirement: rec.requirement ?? null,
-      type: c.type, verdict: normalizeVerdict(rec.verdict), confidence: clampConf(rec.confidence),
-      evidence: rec.evidence ?? null, reasoning: rec.reasoning ?? null, humanVerdict: null, humanNote: null, labeledAt: null,
-    }).run();
-  }
-
-  const detectArtifact = db.select().from(fitVerdicts).where(eq(fitVerdicts.runId, runId)).all()
-    .map((v) => ({ criterionKey: v.criterionKey, verdict: v.verdict, confidence: v.confidence, evidence: v.evidence }));
-  const stages: StageTrace[] = [
-    { stage: "extract", ms: 0, artifact: requirements },
-    { stage: "detect", ms: 0, artifact: detectArtifact },
-  ];
-  db.update(fitRuns).set({ stages: JSON.stringify(stages) }).where(eq(fitRuns.id, runId)).run();
-  recomputeDecision(runId, criteria.filter((c) => c.active), stages);
-  return assembleRun(runId);
-}
-
-const clampConf = (n: unknown): number => {
-  const v = Math.round(Number(n));
-  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 40;
-};
 
 // Recompute the deterministic decision from the run's CURRENT verdicts (incl. human overrides) and
 // refresh the run's score/decision + the Decide trace stage. Called after ingest and after each label.

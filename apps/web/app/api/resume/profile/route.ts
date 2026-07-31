@@ -2,8 +2,10 @@ import { getProfile, setProfile } from "@landed/core/fitlab/store";
 
 export const dynamic = "force-dynamic";
 
-// GET  /api/fitlab/profile → { profile }   (the resume text the assessor judges against)
-// POST /api/fitlab/profile { profile }     → save it
+// The candidate profile — the résumé TEXT the fit and leveling playbooks judge against (auto-adopted
+// from an uploaded base résumé, editable on the Profile page).
+// GET  /api/resume/profile → { profile }
+// POST /api/resume/profile { profile } → save it
 export async function GET() {
   return Response.json({ profile: getProfile() });
 }

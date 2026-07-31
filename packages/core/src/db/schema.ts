@@ -355,10 +355,11 @@ export const postings = sqliteTable("postings", {
   postedAt: text("posted_at"), // ATS posted/published date (from the scan), when available
 });
 
-// ── Fit Lab ────────────────────────────────────────────────────────────────────────────────
-// A standalone learning lab that models fit assessment as a production classification pipeline:
-// Extract → Detect (LLM judge) → Decide → Review (HITL labels). Kept in its own tables so it can
-// evolve without disturbing the live discovery/fit flow (postings.fit_detail). See lib/fitlab/.
+// ── Fit labeling / eval set ─────────────────────────────────────────────────────────────────
+// The accumulated fit-assessment labels: per-criterion verdicts plus the human overrides that ARE
+// the eval set. Written by the former standalone Fit Lab (now removed); retained as the eval store
+// while fit is redesigned, and read via packages/core/src/fitlab/store.ts. Separate from the live
+// discovery/fit flow (postings.fit_detail), which stays a holistic FitAssessment blob.
 //
 // The rubric: stable criterion *categories* (level-match, must-have-coverage, …). Per-posting
 // requirement *instances* roll up into these so verdicts aggregate across runs (the thing that

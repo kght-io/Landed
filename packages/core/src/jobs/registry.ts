@@ -11,7 +11,6 @@ import { exportPrepContextFor, exportQuestionsFor } from "../prep/export-context
 import { str, num } from "@landed/shared/coerce";
 import { parseRedoLog, nextVersion } from "@landed/shared/jobs/redolog";
 import { parseBriefs, nextBriefVersion, coerceGaps, coerceSourced } from "@landed/shared/jobs/briefs";
-import { ingestFitLabResult } from "../fitlab/ingest";
 import { gatherPeerInputs, renderRoster } from "../peercomp/inputs";
 import { setPeerComp } from "./peercomps";
 import { coerceDiff } from "@landed/shared/linediff";
@@ -360,16 +359,6 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     playbook: "fit.md",
     buildTask: () => `Assess fit for the postings in this job using my base resume; write the result per fit.md.`,
     ingest: ingestFit,
-  },
-  "fitlab-assess": {
-    type: "fitlab-assess",
-    title: "Fit Lab assessment",
-    description: "Score one posting against the Fit Lab rubric — per-criterion verdicts (Extract + Detect). App-queued from the Fit Lab.",
-    playbook: "fitlab-assess.md",
-    // The real instruction (rubric + profile + JD embedded) is passed explicitly by queueRun; this
-    // fallback only fires if a job is created without one.
-    buildTask: (p) => `Fit Lab assessment for run ${p?.runId ?? "?"} — follow the embedded task: extract each criterion's JD requirement, judge it against the profile, and submit one verdict record per criterion per fitlab-assess.md.`,
-    ingest: ingestFitLabResult,
   },
   tailoring: {
     type: "tailoring",

@@ -247,8 +247,8 @@ function connection() {
     duration_ms INTEGER,
     summary TEXT
   )`);
-  // Fit Lab — a standalone learning lab (production-shaped fit-assessment pipeline). Own tables so
-  // it never disturbs the live discovery/fit flow. See lib/fitlab/ and lib/db/schema.ts.
+  // Fit labeling / eval set — per-criterion verdicts + the human labels. Own tables, separate from
+  // the live discovery/fit flow. See packages/core/src/fitlab/ and db/schema.ts.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS fit_criteria (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,

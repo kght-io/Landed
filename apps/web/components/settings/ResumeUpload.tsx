@@ -8,9 +8,6 @@ type UploadResp = { ok?: boolean; error?: string; name?: string; bytes?: number;
 
 const fmtBytes = (n?: number) => (n == null ? "" : n < 1024 ? `${n} B` : `${(n / 1024).toFixed(0)} KB`);
 
-// Broadcast so the sibling Candidate-profile card re-fetches when the résumé updates the profile.
-const announceProfile = () => window.dispatchEvent(new Event("fitlab-profile-updated"));
-
 // Upload the base résumé (.docx) — the tailoring source of truth. On upload we extract the text
 // (cross-platform via mammoth) to feed the candidate profile: auto-adopted if the profile is still
 // the untouched seed, otherwise offered here so hand-edits aren't clobbered.
@@ -39,16 +36,15 @@ export default function ResumeUpload() {
     setBusy(false);
     if (!r.ok) { setError(r.error || "upload failed"); return; }
     refresh();
-    if (r.profileUpdated) { setNote("Candidate profile filled from this résumé."); announceProfile(); }
+    if (r.profileUpdated) setNote("Candidate profile filled from this résumé.");
     else if (r.extractedText) setOffer({ text: r.extractedText, chars: r.extractedChars ?? r.extractedText.length });
   };
 
   const applyProfile = async () => {
     if (!offer) return;
-    await fetch("/api/fitlab/profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: offer.text }) }).catch(() => {});
+    await fetch("/api/resume/profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile: offer.text }) }).catch(() => {});
     setOffer(null);
     setNote("Candidate profile replaced with this résumé.");
-    announceProfile();
   };
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {

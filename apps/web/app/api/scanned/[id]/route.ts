@@ -1,6 +1,5 @@
 import { scannedAction, getPosting, setPostingJd, getPostingJd } from "@landed/core/db/queries";
 import { createJob, enqueueTailoring, outstandingFitJobId } from "@landed/core/jobs/store";
-import { queueRun } from "@landed/core/fitlab/queue";
 
 export const dynamic = "force-dynamic";
 
@@ -65,10 +64,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       task: "Assess fit for the posting below. Use the JD in params if present, else fetch it from the URL; then score per fit.md.",
       params: { postings: [{ id: r.fit.id, company: r.fit.company, role: r.fit.role, url: r.fit.url, jd: r.fit.jd ?? "" }] },
     });
-    // ALSO run the same posting through the Fit Lab pipeline (structured per-criterion verdicts) so
-    // the lab accumulates labelable history alongside the holistic pass. Best-effort and ADDITIVE —
-    // wrapped so it can never affect the fit flow (e.g. a posting with no JD yet just isn't mirrored).
-    try { queueRun({ postingId: r.fit.id }); } catch { /* no JD yet, or transient — skip the mirror */ }
   }
   if (r.ok && r.tailor) {
     // Route through enqueueTailoring so the job uses the stable `tailoring-app-<id>` id and the

@@ -150,7 +150,6 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
 - `leveling.md` — fetch a company's levels.fyi ladder (lazy; queued from the fit view's Lvl column)
 - `watchlist-scan.md` — check watchlisted companies' boards for new postings
 - `fit.md` — score fit for postings
-- `fitlab-assess.md` — score ONE posting against the Fit Lab rubric (per-criterion verdicts); app-queued from the Fit Lab page, self-contained task
 - `tailoring.md` — tailor a resume per posting
 - `prep.md` — interview-prep work for a tracked posting
 - `prep-research.md` — research a company's interview process / loop (prioritizing **past, actually-

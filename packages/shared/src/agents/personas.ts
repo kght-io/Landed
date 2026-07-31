@@ -13,7 +13,6 @@ export const PERSONA: Record<string, string> = {
   prep: "Prep Coach",
   "leetcode-add": "Leetcode Scout",
   discovery: "Scout",
-  "fitlab-assess": "Fit Lab",
   "interview-brief": "Interview Briefer",
   "interview-emails": "Interview Scout",
   "peer-comp": "Comp Analyst",

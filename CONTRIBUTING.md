@@ -49,7 +49,7 @@ The loop for any behavior change:
 3. **Run `npm run check`** — the whole suite, to catch regressions elsewhere.
 4. **Self-correct until green.** Don't open a PR on a red or unrun signal.
 
-Tests are pure and fast: pure logic (`shared/src/coerce.ts`, `leveling.ts`, `linediff.ts`)
+Tests are pure and fast: pure logic (`shared/src/util/coerce.ts`, `config/leveling.ts`, `util/linediff.ts`)
 and the job queue (`backend/src/jobs/`) are all directly testable without a live agent — that's most
 of the surface area worth a contribution.
 
@@ -62,7 +62,7 @@ flags — help burn it down, but don't add to it.
   older releases. Read the relevant guide in `node_modules/next/dist/docs/` before writing app
   or routing code, and heed deprecation notices.
 - **Coerce untyped boundaries.** Agent/JSON results arrive as `unknown`. Run them through
-  [shared/src/coerce.ts](shared/src/coerce.ts) (`num` never returns `NaN`; `str` maps empty → `undefined`).
+  [shared/src/util/coerce.ts](shared/src/util/coerce.ts) (`num` never returns `NaN`; `str` maps empty → `undefined`).
   Don't hand-roll `Number(x)` on agent input.
 - **Keep the agent brief in sync.** [instructions/README.md](instructions/README.md) is the
   single source of truth that briefs the agent on how the system works — it's consumed by a

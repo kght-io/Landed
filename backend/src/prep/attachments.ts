@@ -1,7 +1,7 @@
 // Recruiter/interviewer email attachments under <ASSET_ROOT>/interview-prep/<slug>/attachments/.
 // The "Pull interview emails" job downloads the files recruiters send (role/JD PDFs, prep guides,
 // take-home specs) here so the interview-brief job can read them. Written by the app (it holds the
-// IMAP connection); the buffers come from lib/gmail.ts getThreadAttachments.
+// IMAP connection); the buffers come from backend/src/gmail.ts getThreadAttachments.
 import fs from "node:fs";
 import path from "node:path";
 import { PREP_ROOT } from "./export-context";

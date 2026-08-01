@@ -6,7 +6,7 @@ import {
   INBOX_SYNC_TIME_KEY,
   DEFAULT_INBOX_SYNC_TIME,
   parseSyncTime,
-} from "@landed/shared/inbox-schedule";
+} from "@landed/shared/config/inbox-schedule";
 
 // Daily inbox-sync opt-in + the local time it runs at. Persisted app-wide (localStorage, broadcast
 // in-tab) so the Pipeline's Sync-inbox button reflects this state and its in-app timer queues one

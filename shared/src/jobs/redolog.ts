@@ -1,9 +1,9 @@
-import type { DiffOp } from "../linediff";
+import type { DiffOp } from "../util/linediff";
 import type { RedoPhase, RedoTurn } from "../types";
 
 // Helpers for the posting redo conversation (postings.redo_log). One JSON RedoTurn[] holds both
 // logical threads (fit + tailor); callers filter by phase. Each agent turn is a version; user
-// turns are redo instructions. See lib/types.ts RedoTurn and the "redo with a note" flow.
+// turns are redo instructions. See shared/src/types.ts RedoTurn and the "redo with a note" flow.
 
 export function parseRedoLog(raw: string | null | undefined): RedoTurn[] {
   if (!raw) return [];

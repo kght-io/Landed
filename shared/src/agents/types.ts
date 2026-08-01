@@ -46,5 +46,5 @@ export type ReconcileResult = {
 
 // Note: the app and the agent communicate only through files in agent-jobs/ (queue →
 // results → done) plus the exported context files — there is no in-process agent call.
-// Job definitions live in lib/jobs/registry.ts; reconcile() is the one door results
+// Job definitions live in backend/src/jobs/registry.ts; reconcile() is the one door results
 // come through. (A direct-API Agent.run() model used to live here; it was retired.)

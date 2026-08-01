@@ -16,7 +16,7 @@ export const maxDuration = 600; // a full queue drain + tool calls can run for m
 // back to the browser as Server-Sent Events.
 //
 // The run is DECOUPLED from this request: the `claude` child is spawned *detached*, with its stdout
-// redirected straight to a per-type log file (see lib/agents/run-log.ts). This request only *tails*
+// redirected straight to a per-type log file (see backend/src/agents/run-log.ts). This request only *tails*
 // that file. So when the always-on `next dev` server recompiles — which happens every time code is
 // edited (e.g. by Claude Code) and drops the SSE connection, sometimes restarting the node process —
 // the agent KEEPS RUNNING and finishes its work. Aborting this request no longer kills the agent;

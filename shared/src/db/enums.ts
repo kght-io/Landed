@@ -18,6 +18,6 @@ export const COMPANY_TIERS = ["tier1", "tier2", "tier3"] as const;
 export const JOB_STATUSES = ["queued", "wip", "ingested", "failed"] as const;
 // `match` = pick which posting an incoming record belongs to; `unbound` = a fit/tailor result whose
 // echoed id didn't resolve (alert, dismiss-only); `change` = a change an inbox sync WANTS to make,
-// held until you approve it (a plain TEXT column, so no migration — see lib/db/index.ts).
+// held until you approve it (a plain TEXT column, so no migration — see backend/src/db/index.ts).
 export const PENDING_KINDS = ["match", "unbound", "change"] as const;
 export const PENDING_STATUSES = ["pending", "resolved", "dismissed"] as const;

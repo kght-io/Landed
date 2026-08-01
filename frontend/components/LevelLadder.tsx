@@ -4,7 +4,7 @@ import { useState } from "react";
 import { BarChart3, Sparkles } from "lucide-react";
 import PopoverPanel, { anchorFrom } from "@/components/Popover";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
-import { DEFAULT_LEVELING_REF, LEVEL_AXIS, hasLadder, straddleRungs, type Leveling, type LevelingRef } from "@landed/shared/leveling";
+import { DEFAULT_LEVELING_REF, LEVEL_AXIS, hasLadder, straddleRungs, type Leveling, type LevelingRef } from "@landed/shared/config/leveling";
 
 // Reference vs the company, side-by-side on a shared 1–10 axis (both ladders use the same scale, so
 // rungs line up vertically). The company's rungs that straddle the reference's target band are

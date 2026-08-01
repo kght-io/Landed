@@ -1,4 +1,4 @@
-import { listJobs, inboxLastSynced, agentContext, createJob, enqueueInboxSync, reconcileFitQueue, reconcileTailoringQueue, reapStuckJobs } from "@landed/backend/jobs/store";
+import { listJobs, inboxLastSynced, agentContext, createJob, enqueueInboxSync, sweepQueue, clearQueuedJobs } from "@landed/backend/jobs/store";
 import { JOB_DEFS, jobDef } from "@landed/backend/jobs/registry";
 
 export const dynamic = "force-dynamic";
@@ -13,28 +13,14 @@ export const dynamic = "force-dynamic";
 // against the effective status (a stale `wip` lease already reads back as `queued` via listJobs).
 export async function GET(request: Request) {
   try {
-    reconcileFitQueue(); // keep the agent's queue in sync with fit_queue candidates before listing
-    reconcileTailoringQueue(); // and re-queue any tailoring candidate stranded without a live job
-    reapStuckJobs(); // watchdog tick: dead-letter poison jobs (claimed too many times, no result)
+    sweepQueue(); // self-heal before listing: re-assert stranded candidates, reap abandoned claims
     const defs = Object.values(JOB_DEFS);
     const types = defs.filter((d) => !d.hidden).map((d) => ({ type: d.type, title: d.title, description: d.description, playbook: d.playbook }));
     const url = new URL(request.url);
-    const statusParam = url.searchParams.get("status");
-    // `lean=1` (the agent's MCP read path) strips task/params from QUEUED rows so the queue is a
-    // claim-first menu: to get a job's work content you must lease it (claimNext). The app's own UI
-    // omits `lean`, so it still gets full params/task to render job subjects.
-    const lean = url.searchParams.get("lean") === "1";
-    const wanted = statusParam ? new Set(statusParam.split(",").map((s) => s.trim()).filter(Boolean)) : null;
-    const all = wanted ? listJobs().filter((j) => wanted.has(j.status)) : listJobs();
-    const jobs = lean
-      ? all.map((j) => {
-          if (j.status !== "queued") return j;
-          const lite = { ...j }; // queued rows go out as a claim-first menu — no work content
-          delete lite.task;
-          delete lite.params;
-          return lite;
-        })
-      : all;
+    const jobs = listJobs({
+      status: url.searchParams.get("status"),
+      lean: url.searchParams.get("lean") === "1",
+    });
     return Response.json({
       types,
       playbooks: defs.map((d) => d.playbook), // all (incl. hidden) — so the Guides list excludes them
@@ -71,5 +57,16 @@ export async function POST(request: Request) {
     return Response.json({ id });
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 400 });
+  }
+}
+
+// DELETE /api/jobs?type=fit — clear the work queue (that type's, or all of it) in ONE request.
+// Only queued work is cancellable; in-flight jobs are left alone. Returns how many were removed.
+export async function DELETE(request: Request) {
+  try {
+    const type = new URL(request.url).searchParams.get("type");
+    return Response.json({ removed: clearQueuedJobs(type) });
+  } catch (err) {
+    return Response.json({ error: String(err) }, { status: 500 });
   }
 }

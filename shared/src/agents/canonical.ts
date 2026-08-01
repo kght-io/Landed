@@ -1,6 +1,6 @@
 // Company-name canonicalization shared by all ingest sources.
 // Merges known variants, drops junk. Returns null to drop a row entirely.
-import { isTarget } from "../targets.mjs";
+import { isTarget } from "../config/targets.mjs";
 
 export const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -45,6 +45,6 @@ export function canonical(rawName: string): { key: string; name: string } | null
 
 // Default tier for a brand-new company (the user re-tiers via drag-drop): known targets land
 // in tier2, everything else in tier3. tier1 (top target) is only ever set by hand.
-// The target list lives in lib/targets.mjs — customize it there.
+// The target list lives in config/targets.mjs — customize it there.
 export const defaultTier = (key: string): "tier2" | "tier3" =>
   isTarget(key) ? "tier2" : "tier3";

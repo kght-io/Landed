@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bot, Loader2, ChevronRight, FileText, AlertTriangle, RotateCcw } from "lucide-react";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import AgentsLive from "@/components/AgentsLive";
 import AgentMonitor, { type MonitorJob } from "@/components/agents/AgentMonitor";

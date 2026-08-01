@@ -1,5 +1,5 @@
 import { getConfig, setConfig } from "./config-store";
-import { DEFAULT_LEVELING_REF, type LevelingRef } from "@landed/shared/leveling";
+import { DEFAULT_LEVELING_REF, type LevelingRef } from "@landed/shared/config/leveling";
 
 // The candidate's search identity — the source of truth for what counts as a fit. Read by the
 // scan's second pass (the agent) and the fit playbook's leveling. Stored as one JSON blob in

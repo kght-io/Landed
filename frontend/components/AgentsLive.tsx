@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { Bot, ChevronRight, Loader2, Play, Square, Send, Wrench, CheckCircle2, AlertCircle, Eraser, BookOpen, X, Trash2 } from "lucide-react";
 import { useAgentQueue, QUEUE_CLEARED_EVENT } from "@/components/AgentQueueProvider";
 import { agentColor } from "@/components/jobMeta";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 import { personaFor } from "@landed/shared/agents/personas";
 import { useAgentChats, type Entry } from "@/components/AgentChatsProvider";
 import AgentQueue from "@/components/AgentQueue";

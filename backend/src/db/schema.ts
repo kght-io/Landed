@@ -4,11 +4,11 @@ import {
   PENDING_KINDS, PENDING_STATUSES,
 } from "@landed/shared/db/enums";
 
-// Tier of a company. Drives the pipeline rules (see lib/pipeline.ts).
+// Tier of a company. Drives the pipeline rules (see shared/src/pipeline/stages.ts).
 export const companies = sqliteTable("companies", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
-  // Stable slugs (best → broadest); human labels live in TIER_META (lib/pipeline.ts).
+  // Stable slugs (best → broadest); human labels live in TIER_META (shared/src/pipeline/stages.ts).
   tier: text("tier", { enum: COMPANY_TIERS })
     .notNull()
     .default("tier3"),
@@ -329,7 +329,7 @@ export const postings = sqliteTable("postings", {
   // latest. Powers "redo with a note" — the agent replays the whole thread on its next run.
   redoLog: text("redo_log"), // JSON RedoTurn[]
   // Versioned interview briefs (the agent-generated from the interview-prep asset folder). JSON
-  // InterviewBrief[] oldest→newest; each generation appends a version. See lib/jobs/briefs.ts.
+  // InterviewBrief[] oldest→newest; each generation appends a version. See shared/src/jobs/briefs.ts.
   interviewBriefs: text("interview_briefs"), // JSON InterviewBrief[]
   comments: text("comments"), // JSON Comment[] — your personal comment thread on this posting
   scannedAt: text("scanned_at").notNull(),
@@ -342,7 +342,7 @@ export const postings = sqliteTable("postings", {
   // First-hand interview intel you collect in the Interviewing stage (markdown). `comp` = comp
   // structure (funding/runway, base, bonus, equity); `teamNotes` = team / product / work / role
   // focus. Distinct from the short `team` department tag above. Feeds the prep-research job as
-  // recruiter-confirmed ground truth (see lib/jobs/store.ts queuePrepResearch).
+  // recruiter-confirmed ground truth (see backend/src/jobs/store.ts queuePrepResearch).
   comp: text("comp"),
   teamNotes: text("team_notes"),
   interviewed: integer("interviewed", { mode: "boolean" }).notNull().default(false),

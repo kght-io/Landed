@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Activity, AlertTriangle, Bot, HardDrive, Inbox, ListChecks, RefreshCw } from "lucide-react";
-import { ago, fmtTs } from "@landed/shared/format";
-import type { OpsTone } from "@landed/shared/ops";
-import type { OpsSnapshot, OpsAgentRun, OpsFile } from "@landed/backend/db/ops";
+import { ago, fmtTs } from "@landed/shared/format/time";
+import type { OpsTone } from "@landed/shared/format/ops";
+import type { OpsSnapshot, OpsFile } from "@landed/backend/db/ops";
+import type { AgentRunFile } from "@landed/backend/agents/run-log";
 
-type Ops = OpsSnapshot & { agents: OpsAgentRun[]; storage: OpsFile[] };
+type Ops = OpsSnapshot & { agents: AgentRunFile[]; storage: OpsFile[] };
 
 const DOT: Record<OpsTone, string> = {
   good: "bg-emerald-500", warning: "bg-amber-500", critical: "bg-rose-500", neutral: "bg-zinc-500",

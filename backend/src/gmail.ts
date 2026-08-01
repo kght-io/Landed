@@ -214,7 +214,7 @@ export async function getThread(threadId: string): Promise<GmailThread | null> {
 // Every file attachment across a thread's messages. simpleParser already parses the full MIME tree
 // (getThread just discards `p.attachments`); here we keep them. Inline/embedded parts (a cid, i.e.
 // signature images) are skipped — only real attachments (a filename, not related-inline). The
-// caller writes these to disk (see lib/prep/attachments.ts). Returns [] when the thread has none.
+// caller writes these to disk (see backend/src/prep/attachments.ts). Returns [] when the thread has none.
 export type GmailAttachment = { filename: string; contentType: string; content: Buffer };
 export async function getThreadAttachments(threadId: string): Promise<GmailAttachment[]> {
   return withClient(async (client) => {

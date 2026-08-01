@@ -7,7 +7,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { companies, postings } from "../db/schema";
-import { TRACKER_STAGES } from "@landed/shared/pipeline";
+import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 import { canonical, norm } from "@landed/shared/agents/canonical";
 import { getProfile } from "../db/profile";
 import { NON_ENG } from "@landed/shared/jobs/exclude";
@@ -138,7 +138,7 @@ const ENG_POS_TITLE =
   /\b(software engineer|software develop|backend|back[- ]end|frontend|front[- ]end|full[- ]?stack|infrastructure engineer|platform engineer|systems engineer|security engineer|data engineer|machine learning|ml engineer|distributed systems|site reliability|sre|devops|member of technical staff)\b|\bmts\b/i;
 const ENG_DEPT = /\bengineering\b|software|infrastructure|\bplatform\b|technical staff/i;
 // Excluders: GTM / field / non-eng orgs that often carry "engineer"/"architect" in the title.
-// NON_ENG (the exclude filter) is shared with applyGlance — see lib/jobs/exclude.ts.
+// NON_ENG (the exclude filter) is shared with applyGlance — see shared/src/jobs/exclude.ts.
 function matchesTitle(title: string, tokens: string[], quant: boolean): boolean {
   if (quant || tokens.length === 0) return true; // quants: filter by firm, not title level
   const t = title.toLowerCase();

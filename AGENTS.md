@@ -54,7 +54,7 @@ data/  instructions/  scripts/  tests/    (repo-root, shared by every workspace)
   workspace script with cwd set to the *package*, so `next dev` reports cwd = `frontend`; a
   cwd-relative `data/jobhunt.db` silently opens a second, empty database.
 - **Untyped boundaries** — agent/JSON results arrive as `unknown`. Coerce them through
-  [shared/src/coerce.ts](shared/src/coerce.ts) (`num` never returns NaN; `str`
+  [shared/src/util/coerce.ts](shared/src/util/coerce.ts) (`num` never returns NaN; `str`
   maps empty→undefined). Don't hand-roll `Number(x)` on agent input — it re-introduces the
   NaN-defeats-`?? fallback` bug.
 
@@ -95,8 +95,8 @@ The loop for any behavior change:
 4. **Self-correct until green.** Never declare done on a red or unrun signal.
 
 `/loop-engineer <target>` drives this loop end-to-end. Tests live at the repo root (`tests/`) and
-run against every workspace. They are pure and fast — pure logic (`shared/src/coerce.ts`,
-`leveling.ts`, `linediff.ts`) and the queue (`backend/src/jobs/`) are all directly testable
+run against every workspace. They are pure and fast — pure logic (`shared/src/util/coerce.ts`,
+`config/leveling.ts`, `util/linediff.ts`) and the queue (`backend/src/jobs/`) are all directly testable
 without a live agent.
 
 **Lint** (`npm run lint`) runs as an advisory signal — there is a pre-existing `react-hooks`

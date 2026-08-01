@@ -4,7 +4,7 @@ import { jobs, postings, companies } from "../../db/schema";
 import { logEvent, getPosting } from "../../db/queries";
 import { slugFor } from "../../config";
 import { parseRedoLog, nextVersion, renderThread, hasPendingRedo, pendingRedoNote, pendingUserIndex } from "@landed/shared/jobs/redolog";
-import { createJob, now } from "../queue";
+import { createJob, now, dropPendingRedoNote } from "../queue";
 import { enqueueFitRedo, findFitJd } from "./fit";
 import type { Posting, RedoPhase, RedoTurn } from "@landed/shared/types";
 
@@ -16,6 +16,12 @@ import type { Posting, RedoPhase, RedoTurn } from "@landed/shared/types";
 // Keep the tailoring queue in sync with a posting's stage. When a posting enters "Queued"
 // (status `tailoring`, no resume slug) we queue a tailoring job; when it leaves we drop the
 // still-pending one (an already-ingested row stays as history). Deterministic per posting id.
+
+// Cascade-delete for a HARD-DELETED posting: drop its tailoring job whatever state it's in.
+// Deliberately NOT deleteQueuedJob — that one only matches queued/stale-lease rows, so a live `wip`
+// job would survive its posting and send an agent off to tailor a resume for something that no
+// longer exists. Its un-queue and redo-note hooks are no-ops here anyway: the posting is already
+// gone by the time this runs (see DELETE /api/applications/:id).
 export function removeTailoringJob(appId: number | string): void {
   db.delete(jobs).where(eq(jobs.id, `tailoring-app-${appId}`)).run();
 }
@@ -32,7 +38,12 @@ export function syncTailoringJob(p: Posting, opts?: { keepPending?: boolean }): 
     // user chose "keep the job" in the move confirm) also spares it — the queued action outlives the
     // status move.
     const keepRedo = (p.status as string) === "tailored" && hasPendingRedo(p.redoLog ?? [], "tailor");
-    if (existing && existing.status === "queued" && !keepRedo && !opts?.keepPending) db.delete(jobs).where(eq(jobs.id, id)).run();
+    if (existing && existing.status === "queued" && !keepRedo && !opts?.keepPending) {
+      db.delete(jobs).where(eq(jobs.id, id)).run();
+      // The job we just dropped may have been a redo — take its pending note with it, or the
+      // conversation keeps a request the queue no longer reflects (see dropPendingRedoNote).
+      dropPendingRedoNote(Number(p.id), "tailor");
+    }
     return;
   }
   enqueueTailoring(p);

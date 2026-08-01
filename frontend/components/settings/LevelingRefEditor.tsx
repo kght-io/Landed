@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DEFAULT_LEVELING_REF, type LevelingRef } from "@landed/shared/leveling";
+import { DEFAULT_LEVELING_REF, type LevelingRef } from "@landed/shared/config/leveling";
 import LevelingRefPanel from "@/components/LevelingRefPanel";
 
 // Self-contained wrapper around LevelingRefPanel for the settings page (the Pipeline page owns its

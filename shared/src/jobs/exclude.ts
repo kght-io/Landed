@@ -1,5 +1,5 @@
 // Shared exclude filter — the title/department patterns that disqualify a posting regardless of
-// who fetched it. Applied by the app's api scan (lib/jobs/scan.ts) AND enforced server-side on
+// who fetched it. Applied by the app's api scan (backend/src/jobs/scan.ts) AND enforced server-side on
 // every glance submission (applyGlance), so careers-get/browser fetches get the exact same
 // exclusion as api without the agent re-implementing it per method.
 //

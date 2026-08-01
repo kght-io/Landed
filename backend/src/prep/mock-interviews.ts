@@ -2,7 +2,7 @@
 // per-company transcripts, these are CROSS-COMPANY practice — a separate mock-interview chat pushes a
 // session here via the `logMockInterview` MCP tool, and the readiness chat (instructions/readiness.md)
 // reconciles their gaps into the GLOBAL gap ledger. Each save is a NEW inode (never an in-place
-// overwrite), mirroring lib/prep/transcripts.ts — cheap append-only capture, cloud-sync-corruption-safe.
+// overwrite), mirroring backend/src/prep/transcripts.ts — cheap append-only capture, cloud-sync-corruption-safe.
 import fs from "node:fs";
 import path from "node:path";
 import { PREP_ROOT } from "./export-context";

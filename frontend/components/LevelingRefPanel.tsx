@@ -1,7 +1,7 @@
 "use client";
 
 import Field from "@/components/Field";
-import { type LevelingRef } from "@landed/shared/leveling";
+import { type LevelingRef } from "@landed/shared/config/leveling";
 import { EditToggle, PreviewItem } from "@/components/settings/EditControls";
 
 // Editable leveling reference — the anchor every company is matched against in the level popover.

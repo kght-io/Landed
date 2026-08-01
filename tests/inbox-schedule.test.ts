@@ -7,7 +7,7 @@ import {
   inboxSyncPending,
   INBOX_SYNC_PENDING_GRACE_MS,
   DEFAULT_INBOX_SYNC_TIME,
-} from "@landed/shared/inbox-schedule";
+} from "@landed/shared/config/inbox-schedule";
 
 const at = DEFAULT_INBOX_SYNC_TIME; // 08:00 local
 

@@ -1,13 +1,13 @@
-import { eq, lt } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import { db } from "./db";
-import { jobs, threads, threadSteps } from "./db/schema";
+import { threads, threadSteps } from "./db/schema";
 
 // ── the agent thread heartbeat ──
 // A "thread" is one the agent session. The Claude Code runner spawns a separate `jobhunt` MCP server
 // process per session; that process mints a threadId at boot and tags every call with it
 // (x-jobhunt-thread). We record the session here (register/heartbeat) and a per-call trace
 // (recordStep). There's no user-facing threads view anymore — the Agents page reads the job ledger
-// (AgentMonitor). This survives as an INTERNAL liveness signal: reapStuckJobs (lib/jobs/store.ts)
+// (AgentMonitor). This survives as an INTERNAL liveness signal: reapStuckJobs (backend/src/jobs/store.ts)
 // uses each thread's lastSeenAt to detect a silent/crashed session fast (~15 min) instead of waiting
 // out the 60-min claim lease.
 
@@ -59,18 +59,12 @@ export function recordStep(input: {
       summary: input.summary?.slice(0, 280) ?? null,
     })
     .run();
+  // Increment in SQL rather than read-then-write: one statement instead of two, and the count can't
+  // be lost if this ever runs against more than one connection.
   db.update(threads)
-    .set({ lastSeenAt: ts, steps: (db.select().from(threads).where(eq(threads.id, id)).get()?.steps ?? 0) + 1 })
+    .set({ lastSeenAt: ts, steps: sql`${threads.steps} + 1` })
     .where(eq(threads.id, id))
     .run();
   // Cheap rolling prune so the trace table can't grow unbounded (indexed by ts).
   db.delete(threadSteps).where(lt(threadSteps.ts, new Date(Date.now() - STEP_RETENTION_MS).toISOString())).run();
-}
-
-// Stamp a job with the session that claimed it (called from the claim path with the request's thread
-// header). Best-effort: a missing/blank threadId is a no-op, so non-the agent claims are unaffected.
-export function stampJobThread(jobId: string, threadId?: string | null): void {
-  const tid = threadId?.trim();
-  if (!tid || !jobId) return;
-  db.update(jobs).set({ threadId: tid }).where(eq(jobs.id, jobId)).run();
 }

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RotateCcw, X, Loader2, Check, Clock } from "lucide-react";
-import { jobSubject, KILL_CONFIRM, actorLabel } from "@/components/jobMeta";
+import { jobSubject, KILL_CONFIRM, actorLabel, doneRetentionMs } from "@/components/jobMeta";
 import { QUEUE_CLEARED_EVENT } from "@/components/AgentQueueProvider";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 
 type Job = {
   id: string;
@@ -18,11 +18,6 @@ type Job = {
   summary?: string | null;
   params?: Record<string, unknown>;
 };
-
-const HOUR_MS = 3_600_000;
-// How long a Done job lingers after completion before dropping off. Fit runs in bursts, so keep its
-// finished jobs visible for a full day; other types clear after an hour.
-const doneRetentionMs = (type: string) => (type === "fit" ? 24 * HOUR_MS : HOUR_MS);
 
 // One agent's jobs in a single list, each tagged In progress / Queued / Done — newest-added first
 // (descending by added order). Done jobs linger after completion so you can see what just finished,

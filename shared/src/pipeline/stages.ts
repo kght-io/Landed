@@ -1,4 +1,4 @@
-import { STATUS_ORDER, type Posting, type Status, type Tier } from "./types";
+import { STATUS_ORDER, type Posting, type Status, type Tier } from "../types";
 
 // The tracker stages — postings graduated past discovery. One unified `candidates` table now: the
 // funnel owns the pre-apply stages, the board/tracker read these. (Home here — a leaf module — so

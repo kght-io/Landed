@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Briefcase, CalendarDays, GitBranchPlus, Bot, GraduationCap } from "lucide-react";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 import type { DashboardStats, Tone, SeriesPoint, PrepPoint } from "@landed/backend/db/dashboard";
 
 const TONE_BAR: Record<Tone, string> = {

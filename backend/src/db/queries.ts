@@ -3,16 +3,16 @@ import { db } from "./index";
 import { companies, events, interviews, pendingMatches, postings } from "./schema";
 import type { PostingRow, CompanyRow, EventRow } from "./schema";
 import { canonical, defaultTier, norm } from "@landed/shared/agents/canonical";
-import { maybeQueuePrepResearch } from "../jobs/store";
+import { emitStageChange } from "./stage-change";
 import { parseRedoLog } from "@landed/shared/jobs/redolog";
 import { parseBriefs } from "@landed/shared/jobs/briefs";
 import { isExcludedTitle } from "@landed/shared/jobs/exclude";
-import type { Leveling } from "@landed/shared/leveling";
-import { describeChanges, type DescribedChange, type FieldDiff } from "@landed/shared/change-format";
+import type { Leveling } from "@landed/shared/config/leveling";
+import { describeChanges, type DescribedChange, type FieldDiff } from "@landed/shared/format/change";
 import type { Comment, EmailRefs, FitAssessment, InterviewKind, Interviewer, InterviewRound, Posting, RedoTurn, Status, Tier } from "@landed/shared/types";
 import type { InterviewRow } from "./schema";
 import type { IncomingApp } from "@landed/shared/agents/types";
-import { TRACKER_STAGES } from "@landed/shared/pipeline";
+import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString(); // full ISO — for company audit timestamps
@@ -368,8 +368,9 @@ export function updateApplication(id: number, patch: ApplicationPatch, actor?: s
   db.update(postings).set(set as Partial<typeof postings.$inferInsert>).where(eq(postings.id, id)).run();
   const after = getPosting(id);
 
-  // Entering the interview stage auto-queues a per-company prep-research job (one-shot).
-  if (patch.status) maybeQueuePrepResearch(rawBefore.companyId, rawBefore.state, patch.status);
+  // Announce the stage move; the jobs layer decides what it's worth (entering `interview` earns a
+  // one-shot prep-research job). This file deliberately doesn't know that — see ./stage-change.ts.
+  if (patch.status) emitStageChange({ companyId: rawBefore.companyId, from: rawBefore.state, to: patch.status });
 
   // One event per changed field, capturing field + old → new so the change log is auditable.
   const fmt = (v: unknown) => (v == null || v === "" ? undefined : String(v));
@@ -628,7 +629,7 @@ const parseEmailRefs = (s: string | null): EmailRefs | undefined => {
   } catch { return undefined; }
 };
 // Candidate count per funnel step — `state` IS the step, so this is a plain tally. Keys match the
-// discovery-spine step keys (lib/discovery.ts) one-to-one; the funnel reads them for its badges.
+// discovery-spine step keys (shared/src/pipeline/discovery.ts) one-to-one; the funnel reads them for its badges.
 // `terms` (optional) filters to postings whose COMPANY name matches any term (case-insensitive
 // substring, OR) — drives the home spine's "where is this company?" filtered heatmap.
 export function scannedBucketCounts(terms?: string[]): Record<string, number> {

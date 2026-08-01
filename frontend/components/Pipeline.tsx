@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, Bold, Bot, Check, ChevronDown, ChevronRight, Coins, ExternalLink, GitCompareArrows, Info, List, Loader2, Mail, MessageSquare, MoreHorizontal, Pencil, Pin, RefreshCw, Trash2, X } from "lucide-react";
 import PopoverPanel, { anchorFrom } from "@/components/Popover";
-import { columnOf, fitColor, statusesForColumn, STATUS_CHIP, STATUS_LABEL, trackerDate, type ColumnId } from "@landed/shared/pipeline";
+import { columnOf, fitColor, statusesForColumn, STATUS_CHIP, STATUS_LABEL, trackerDate, type ColumnId } from "@landed/shared/pipeline/stages";
 import TrackerTag from "@/components/TrackerTag";
 import { LevelChip } from "@/components/LevelLadder";
-import { DEFAULT_LEVELING_REF, hasLadder, type Leveling, type LevelingRef } from "@landed/shared/leveling";
+import { DEFAULT_LEVELING_REF, hasLadder, type Leveling, type LevelingRef } from "@landed/shared/config/leveling";
 import { useApplications } from "@/hooks/useApplications";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import { JOB_ADDED_EVENT } from "@/components/AddFitModal";
@@ -16,14 +16,14 @@ import CompanyDrawer from "@/components/board/CompanyDrawer";
 import ResumeDiffModal from "@/components/ResumeDiff";
 import PeerCompModal from "@/components/PeerCompModal";
 import { tailorDiffFor, lastTailoredAt } from "@landed/shared/jobs/redolog";
-import { aggregateCompanies, type CompanyAgg } from "@landed/shared/board";
+import { aggregateCompanies, type CompanyAgg } from "@landed/shared/pipeline/board";
 import { ResTh } from "@/components/ResizableTable";
-import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, stepCount, type SpineStep } from "@landed/shared/discovery";
+import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, stepCount, type SpineStep } from "@landed/shared/pipeline/discovery";
 import type { Comment, Posting, FitAssessment, RedoTurn, Status } from "@landed/shared/types";
 import { JobStatusChip, type WorkStatus } from "@/components/JobStatus";
-import { ago, fmtTs } from "@landed/shared/format";
+import { ago, fmtTs } from "@landed/shared/format/time";
 import { usePersistentState } from "@/hooks/usePersistentState";
-import { shouldAutoSyncInbox, inboxSyncPending, INBOX_SYNC_PENDING_GRACE_MS, dailySyncJobId, INBOX_DAILY_SYNC_KEY, INBOX_SYNC_TIME_KEY, DEFAULT_INBOX_SYNC_TIME } from "@landed/shared/inbox-schedule";
+import { shouldAutoSyncInbox, inboxSyncPending, INBOX_SYNC_PENDING_GRACE_MS, dailySyncJobId, INBOX_DAILY_SYNC_KEY, INBOX_SYNC_TIME_KEY, DEFAULT_INBOX_SYNC_TIME } from "@landed/shared/config/inbox-schedule";
 
 const FUNNEL_LABEL: Record<string, string> = { sel: "", company: "Company", title: "Title", location: "Location", fit: "Fit", lvl: "Lvl", comment: "Note", gaps: "Gaps", resume: "Resume", status: "Status", applied: "Applied", updated: "Last updated", act: "Action" };
 // The table is `table-layout: fixed` (frozen columns need their declared widths to be authoritative,
@@ -41,13 +41,13 @@ const COL_CLASS: Record<string, string> = {
   resume: "text-[13px] text-zinc-500", applied: "tabular-nums text-zinc-500", updated: "tabular-nums text-zinc-500",
 };
 
-// The whole pipeline IS the discovery spine (defined in lib/discovery.ts), drawn as a connected
+// The whole pipeline IS the discovery spine (defined in shared/src/pipeline/discovery.ts), drawn as a connected
 // arrow ribbon, left → right. The leading steps span candidate scan-store states (Fit Assessment =
 // matched + review + fit_queue + assessed; Tailor Resume = tailoring + tailored; Apply Later = apply_later); the last
-// three are TRACKER steps that read `postings` (the applications table) filtered by lib/pipeline columnOf, and
+// three are TRACKER steps that read `postings` (the applications table) filtered by shared/src/pipeline/stages columnOf, and
 // a row click opens the company drawer to manage it.
 type ActionKey = "queue-fit" | "discard" | "tailor" | "apply";
-// Tracker steps map a spine key → the pipeline column its postings live in (lib/pipeline columnOf).
+// Tracker steps map a spine key → the pipeline column its postings live in (shared/src/pipeline/stages columnOf).
 const STEP_COLUMN: Record<string, ColumnId> = { applied: "applied", interview: "interviewing", closed: "closed" };
 const isTrackerStep = (key: string) => key in STEP_COLUMN;
 // Every pipeline step shows the SAME columns, so a row reads consistently across stages (you always

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Code2, Network, Building2, Loader2, ChevronRight, CircleCheck, CircleDashed, MessageSquare, CalendarClock } from "lucide-react";
-import { STATUS_LABEL } from "@landed/shared/pipeline";
+import { STATUS_LABEL } from "@landed/shared/pipeline/stages";
 import type { Status } from "@landed/shared/types";
 import TabBar from "./TabBar";
 

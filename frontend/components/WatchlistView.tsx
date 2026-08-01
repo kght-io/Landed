@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApplications } from "@/hooks/useApplications";
-import { buildTargetCounts } from "@landed/shared/pipeline";
+import { buildTargetCounts } from "@landed/shared/pipeline/stages";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import TabBar from "@/components/prep/TabBar";
 import TargetsTable from "@/components/board/TargetsTable";

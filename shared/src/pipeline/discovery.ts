@@ -1,16 +1,16 @@
 // The pipeline spine — the single source of truth for the home Pipeline page's stages, drawn as the
-// arrow-ribbon funnel (components/Pipeline.tsx). `turn` = whose move it is: you = your decision,
+// arrow-ribbon funnel (frontend/components/Pipeline.tsx). `turn` = whose move it is: you = your decision,
 // cowork = waiting on the agent, done = graduated to the tracker, archive = dropped.
 // A step spans one or more `states`: pre-apply steps over candidate scan-store states (Fit
 // Assessment = fit_queue + assessed; Tailor Resume = tailoring + tailored; Apply Later = apply_later)
-// summed from /api/scanned?state=<states>; tracker steps over Posting statuses (filtered via lib/pipeline columnOf).
+// summed from /api/scanned?state=<states>; tracker steps over Posting statuses (filtered via pipeline/stages columnOf).
 export type Turn = "you" | "cowork" | "done" | "archive";
 export type SpineStep = { key: string; label: string; turn: Turn; states: string[]; hint?: string };
 
 // The full pipeline, left → right. The first three steps are pre-apply candidate stages backed by
 // the scan store (/api/scanned); the last three are tracker stages backed by `postings` (the
 // applications table). A tracker step's `states` are the Posting statuses that roll into it (same
-// grouping as lib/pipeline columnOf), so the funnel can filter postings by status per step.
+// grouping as pipeline/stages columnOf), so the funnel can filter postings by status per step.
 export const DISCOVERY_SPINE: SpineStep[] = [
   // Note: the watchlist/scan-setup + the scan-results TRIAGE (states `matched`/`review`) live on the
   // /watchlist route now — you add scan results to Fit from the Watchlist page's "Scan results" tab.

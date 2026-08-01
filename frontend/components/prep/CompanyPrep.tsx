@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Loader2, ExternalLink, Download } from "lucide-react";
 import type { CompanyProfile, PrepQuestion } from "@landed/backend/db/prep";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 import { usePrep } from "@/hooks/usePrep";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import PrepShell from "./PrepShell";

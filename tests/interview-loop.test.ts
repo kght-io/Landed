@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextRound, roundWhen, hasDetail } from "@landed/shared/interview-loop";
+import { nextRound, roundWhen, hasDetail } from "@landed/shared/pipeline/interview-loop";
 import type { InterviewRound } from "@landed/shared/types";
 
 const r = (o: Partial<InterviewRound>): InterviewRound => o;

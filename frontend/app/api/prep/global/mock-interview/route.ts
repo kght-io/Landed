@@ -3,7 +3,7 @@ import { saveMockSession, listMockSessions, type MockGap } from "@landed/backend
 export const dynamic = "force-dynamic";
 
 // Coerce untyped JSON gaps into MockGap[] — keep only rows with a real area + detail (agent input is
-// unknown; don't trust its shape). See lib/coerce.ts for the NaN/empty-string discipline.
+// unknown; don't trust its shape). See shared/src/util/coerce.ts for the NaN/empty-string discipline.
 function coerceGaps(raw: unknown): MockGap[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const gaps = raw

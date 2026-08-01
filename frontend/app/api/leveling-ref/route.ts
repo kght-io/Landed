@@ -1,5 +1,5 @@
 import { getLevelingRef, setLevelingRef } from "@landed/backend/db/profile";
-import type { LevelingRef } from "@landed/shared/leveling";
+import type { LevelingRef } from "@landed/shared/config/leveling";
 
 export const dynamic = "force-dynamic";
 

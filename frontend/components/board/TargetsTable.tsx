@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HelpCircle, Info, Loader2, Plus, Radar, RefreshCw, Sparkles, Trash2, Undo2, X } from "lucide-react";
-import { ago } from "@landed/shared/format";
-import { TIER_META, TIERS, type TargetCounts } from "@landed/shared/pipeline";
+import { ago } from "@landed/shared/format/time";
+import { TIER_META, TIERS, type TargetCounts } from "@landed/shared/pipeline/stages";
 import TrackerTag from "@/components/TrackerTag";
 import { useResizableColumns, ResTh } from "@/components/ResizableTable";
 import { useAgentQueue } from "@/components/AgentQueueProvider";

@@ -3,7 +3,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedCandidate, db, jobs } from "./helpers";
-import { createJob, claimJob, claimNext, requeueJob, deleteQueuedJob, listJobs, enqueueFit, reconcileFitQueue, listFitQueue, submitJobResult } from "@landed/backend/jobs/store";
+import { createJob, claimJob, claimNext, requeueJob, deleteQueuedJob, clearQueuedJobs, listJobs, enqueueFit, reconcileFitQueue, listFitQueue, submitJobResult } from "@landed/backend/jobs/store";
 import { getPosting } from "@landed/backend/db/queries";
 
 beforeEach(reset);
@@ -144,6 +144,80 @@ test("submitJobResult ignores a duplicate submit on an already-ingested job (no 
   const after = jobRow(id);
   assert.equal(after.ingestedAt, recorded.ingestedAt, "ingestedAt unchanged — not re-ingested");
   assert.equal(after.result, recorded.result, "the stale records did not clobber the recorded result");
+});
+
+// --- clearing the queue in one call, with the per-type hooks intact ----------------------
+
+test("clearing the queue drops claimable work, spares live runs, and un-queues the candidates", () => {
+  const cid = seedCandidate({ company: "Notion", title: "Senior Engineer", state: "fit_queue" });
+  enqueueFit({ company: "Notion", role: "Senior Engineer", jd: "JD text" });
+  createJob({ id: "tailoring-keep", type: "tailoring", params: { postings: [{ id: 1, company: "Ramp" }] } });
+  const live = createJob({ id: "fit-live-clear", type: "fit", params: { postings: [{ company: "Vercel" }] } });
+  claimJob(live, "agent-A"); // in flight under a live lease — not cancellable
+
+  assert.equal(clearQueuedJobs("fit"), 1, "only the queued fit job goes");
+  assert.equal(jobRow(live).status, "wip", "a job being worked right now is left alone");
+  assert.ok(db.select().from(jobs).where(eq(jobs.id, "tailoring-keep")).get(), "another type is untouched");
+  // The per-type onUnqueue hook still ran — otherwise the reconciler would just re-create the job.
+  assert.equal(getPosting(cid)!.status, "review", "the candidate went back to the triage list, not stranded in fit_queue");
+  assert.equal(reconcileFitQueue(), 0, "so the self-heal doesn't immediately re-queue it");
+});
+
+test("clearing with no type clears every queue", () => {
+  createJob({ id: "fit-all-1", type: "fit", params: { postings: [{ company: "A" }] } });
+  createJob({ id: "tailoring-all-1", type: "tailoring", params: { postings: [{ id: 1, company: "B" }] } });
+  assert.equal(clearQueuedJobs(), 2);
+  assert.equal(listJobs().length, 0);
+});
+
+// --- the posting a job is a projection of, derived server-side ---------------------------
+// The UI matches jobs to postings on these instead of rebuilding `tailoring-app-<id>` / the
+// `fit-redo-<id>` convention in the browser, where an id change here would break it silently.
+
+test("a job carries the posting it drives and the phase it drives it through", () => {
+  const cid = seedCandidate({ company: "Stripe", title: "Staff Engineer", state: "tailoring" });
+  createJob({ id: `tailoring-app-${cid}`, type: "tailoring", params: { postings: [{ id: cid, company: "Stripe" }] } });
+  createJob({ id: "inbox-nophase", type: "inbox-sync", params: {} });
+
+  const tailor = listJobs().find((j) => j.id === `tailoring-app-${cid}`)!;
+  assert.equal(tailor.postingId, cid);
+  assert.equal(tailor.phase, "tailor");
+
+  const inbox = listJobs().find((j) => j.id === "inbox-nophase")!;
+  assert.equal(inbox.postingId, null, "a job that isn't about one posting says so");
+  assert.equal(inbox.phase, null);
+});
+
+// --- the two ways a job goes back to `queued` -------------------------------------------
+// RELEASED (abandoned / agent moved on) keeps the attempt budget consumed, so a job nobody can
+// finish still walks down to the dead-letter. RESTARTED (a hand requeue, or re-queuing an id)
+// is a deliberate fresh run and resets everything. Conflating the two is how a poison job either
+// loops forever or can never be retried.
+
+test("an abandoned claim is RELEASED — claimable again, but the attempt still counted", () => {
+  const id = createJob({ id: "fit-released", type: "fit", params: { postings: [{ company: "Stripe" }] } });
+  claimJob(id, "agent-A");
+  ageClaim(id, 70);
+  claimNext("agent-B", "fit"); // reaps first, releasing the abandoned claim
+
+  assert.equal(jobRow(id).attempts, 2, "the budget is spent, not refunded — 1 original claim + 1 reclaim");
+});
+
+test("a manual requeue RESTARTS the job — fresh budget, and any recorded run discarded", () => {
+  const id = createJob({ id: "fit-restarted", type: "fit", params: { postings: [{ company: "Ramp" }] } });
+  claimJob(id, "agent-A");
+  // A job carrying both a spent budget and a recorded result (the shape a dead-lettered row can
+  // reach after an earlier run) — a requeue must leave neither behind.
+  db.update(jobs).set({ status: "failed", attempts: 3, error: "stuck", result: "[{\"stale\":true}]", summary: "old run", ingestedAt: "2026-01-01T00:00:00.000Z" }).where(eq(jobs.id, id)).run();
+
+  assert.equal(requeueJob(id), true);
+  const row = jobRow(id);
+  assert.equal(row.status, "queued");
+  assert.equal(row.attempts, 0, "fresh retry budget — not instantly re-failed");
+  assert.equal(row.error, null, "the dead-letter reason is cleared");
+  assert.equal(row.result, null, "the prior run's records don't survive into the new one");
+  assert.equal(row.summary, null);
+  assert.equal(row.ingestedAt, null);
 });
 
 // --- claimNext: lease the next job + its work content in one call -------------------------

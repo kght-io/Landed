@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Circle, X, ArrowRight, Rocket, FilePlus2 } from "lucide-react";
 import { useAddJob } from "@/components/AddJobProvider";
-import { onboardingAllDone, OPEN_GETSTARTED_EVENT, type OnboardingStatus } from "@landed/shared/onboarding-shared";
+import { onboardingAllDone, OPEN_GETSTARTED_EVENT, type OnboardingStatus } from "@landed/shared/onboarding";
 
 const DISMISS_KEY = "landed.getstarted.dismissed";
 

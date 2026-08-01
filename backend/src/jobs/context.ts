@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { db } from "../db";
 import { postings, companies } from "../db/schema";
-import { TRACKER_STAGES } from "@landed/shared/pipeline";
+import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 import { inboxLastSynced } from "./enqueue/inbox";
 
 // The read-context the agent works against — for the "What it sees" panel.

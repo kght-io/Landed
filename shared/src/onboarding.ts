@@ -1,5 +1,5 @@
 // Client-safe onboarding shapes + helpers — NO server imports (fs/db/gmail), so both the client
-// checklist and the server status reader (lib/onboarding.ts) can use them.
+// checklist and the server status reader (backend/src/onboarding.ts) can use them.
 
 // Dispatched on `window` (by the empty-table "Get started" button) to re-open the checklist card
 // after it's been dismissed. The card listens for it; progress is always read live, so nothing else

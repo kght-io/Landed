@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { User, Bot, AlertTriangle, Check, X, Loader2, Mail, Search, ChevronRight } from "lucide-react";
 import type { Posting } from "@landed/shared/types";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 import { actorLabel, sourceLabel } from "@/components/jobMeta";
-import { describeChange, type DescribedChange } from "@landed/shared/change-format";
+import { describeChange, type DescribedChange } from "@landed/shared/format/change";
 
 type EventView = {
   id: number;
@@ -30,7 +30,7 @@ type PendingMatch = {
   detail?: string; // unbound: a "couldn't bind" message
   incoming: { role: string | null; status: string; note: string | null; appliedDate: string | null };
   candidates: { id: number; role: string | null; status: string; appliedDate: string | null }[];
-  // change: what an inbox sync wants to do, already in plain English (see lib/change-format).
+  // change: what an inbox sync wants to do, already in plain English (see shared/src/format/change).
   changes?: DescribedChange[];
   create?: boolean; // approving creates the posting rather than editing one
   role?: string | null;

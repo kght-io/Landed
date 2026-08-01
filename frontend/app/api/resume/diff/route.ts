@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { PATHS, resolveResume } from "@landed/backend/config";
-import { lineDiff } from "@landed/shared/linediff";
+import { lineDiff } from "@landed/shared/util/linediff";
 
 export const dynamic = "force-dynamic";
 

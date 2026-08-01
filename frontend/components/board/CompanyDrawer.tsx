@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, XCircle, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Coins, Target, ArrowRightCircle, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle, ChevronRight } from "lucide-react";
 import type { BriefGap, InterviewBrief, InterviewRound, Posting, RedoTurn, SourcedText, Status, Tier } from "@landed/shared/types";
-import { reapplyInfo, STATUS_LABEL, STATUS_CHIP, TIER_META, TIERS } from "@landed/shared/pipeline";
-import { nextRound, roundWhen, hasDetail } from "@landed/shared/interview-loop";
-import { type CompanyAgg } from "@landed/shared/board";
+import { reapplyInfo, STATUS_LABEL, STATUS_CHIP, TIER_META, TIERS } from "@landed/shared/pipeline/stages";
+import { nextRound, roundWhen, hasDetail } from "@landed/shared/pipeline/interview-loop";
+import { type CompanyAgg } from "@landed/shared/pipeline/board";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import { tailorDiffFor } from "@landed/shared/jobs/redolog";
 import { FitBadge, GapList } from "./Badges";

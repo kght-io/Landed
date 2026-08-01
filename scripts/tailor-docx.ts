@@ -1,6 +1,6 @@
 // Tailoring helper for the Résumé Tailor agent. Given the base .docx and a JSON list of
 // {find, replace} edits, it produces a tailored resume.docx + resume.pdf in the output folder —
-// handling Word's run fragmentation (via lib/resume/docx) and the PDF render (via soffice) so the
+// handling Word's run fragmentation (via shared/src/resume/docx) and the PDF render (via soffice) so the
 // agent never re-derives either. Build happens in a temp dir, then files are copied into the
 // (cloud-synced) output folder as fresh inodes; see the ASSET_ROOT overwrite-corruption note.
 //

@@ -13,7 +13,7 @@ export const INSTRUCTIONS_ROOT = process.env.INSTRUCTIONS_ROOT || repoPath("inst
 
 // NOTE: the agent job queue (agent-jobs/{queue,results,done}) and the app-export/* context
 // files were retired — the job queue + ledger now live in the `jobs` DB table, and the agent
-// reads context + submits results over the jobhunt MCP tools. See lib/jobs/store.ts.
+// reads context + submits results over the jobhunt MCP tools. See backend/src/jobs/store.ts.
 
 // Resolve a client-supplied relative path safely inside INSTRUCTIONS_ROOT.
 // Returns null if it escapes the root or isn't a .md file.

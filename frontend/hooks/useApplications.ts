@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Posting, Status, Tier } from "@landed/shared/types";
-import type { ColumnId } from "@landed/shared/pipeline";
-import { TODAY, slug } from "@landed/shared/board";
+import type { ColumnId } from "@landed/shared/pipeline/stages";
+import { TODAY, slug } from "@landed/shared/pipeline/board";
 
 // Which status a pipeline column represents. "closed" collapses several outcomes, so a
 // drop there means "company_skipped" (you passed) — set rejected/ghost/expired precisely in the drawer.

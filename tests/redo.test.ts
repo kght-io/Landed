@@ -3,7 +3,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { reset, seedCandidate, db, postings, jobs } from "./helpers";
-import { submitJobResult, claimJob, enqueueTailoring, requeueRedo, reconcileTailoringQueue, deleteQueuedJob } from "@landed/backend/jobs/store";
+import { submitJobResult, claimJob, enqueueTailoring, requeueRedo, reconcileTailoringQueue, deleteQueuedJob, syncTailoringJob } from "@landed/backend/jobs/store";
 import { getPosting } from "@landed/backend/db/queries";
 import { parseRedoLog, hasPendingRedo } from "@landed/shared/jobs/redolog";
 
@@ -62,6 +62,38 @@ test("reconcileTailoringQueue leaves healthy candidates alone (tailored w/o redo
   deleteQueuedJob(`tailoring-app-${live}`); // removing un-queues the candidate back to assessed…
   db.update(postings).set({ state: "tailoring" }).where(eq(postings.id, live)).run(); // …simulate it stuck in tailoring
   assert.equal(reconcileTailoringQueue(), 1, "a re-stranded candidate is healed");
+});
+
+// A queued redo is shown from the JOB (the live "Queued for redo" tag reads the queue), while the
+// note itself lives on the posting's redo log. Drop one without the other and the two disagree:
+// the tag is gone but a dangling pending turn stays in the conversation forever, and the next
+// enqueue replays it as if the user had just asked for it.
+
+test("dropping a posting's tailoring job on a stage exit also drops its dangling redo note", () => {
+  const id = seedCandidate({ company: "Datadog", title: "Staff Engineer", state: "tailored" });
+  db.update(postings).set({ resumeDir: "datadog-staff-x/v1" }).where(eq(postings.id, id)).run();
+
+  requeueRedo(id, "tailor", "Lead with the observability work.");
+  assert.ok(hasPendingRedo(rawLog(id), "tailor"), "the redo note is pending");
+  assert.ok(db.select().from(jobs).where(eq(jobs.id, `tailoring-app-${id}`)).get(), "and its job is queued");
+
+  // The posting leaves the tailor stage entirely (e.g. you submitted the application).
+  db.update(postings).set({ state: "applied" }).where(eq(postings.id, id)).run();
+  syncTailoringJob(getPosting(id)!);
+
+  assert.equal(db.select().from(jobs).where(eq(jobs.id, `tailoring-app-${id}`)).get(), undefined, "the queued job is dropped");
+  assert.equal(hasPendingRedo(rawLog(id), "tailor"), false, "and the note it represented goes with it");
+});
+
+test("a stage exit that SPARES the job leaves its redo note intact", () => {
+  const id = seedCandidate({ company: "Snowflake", title: "Staff Engineer", state: "tailored" });
+  db.update(postings).set({ resumeDir: "snowflake-staff-x/v1" }).where(eq(postings.id, id)).run();
+  requeueRedo(id, "tailor", "More distributed systems.");
+
+  // `tailored` + a pending redo is the keepRedo case — the redo runs against the resume it has.
+  syncTailoringJob(getPosting(id)!);
+  assert.ok(db.select().from(jobs).where(eq(jobs.id, `tailoring-app-${id}`)).get(), "the job survives");
+  assert.ok(hasPendingRedo(rawLog(id), "tailor"), "so does its note");
 });
 
 test("tailoring redo accrues versions: v1 → redo note → v2, resumeDir tracks the latest", () => {

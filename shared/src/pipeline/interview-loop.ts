@@ -1,7 +1,7 @@
 // Reading an interview loop: which round is up next, and how to say when it is. Pure — the drawer's
 // "Up next" card and the timeline both render off these, and the phrasing stays directly testable.
 
-import type { InterviewRound } from "./types";
+import type { InterviewRound } from "../types";
 
 // A round is outstanding until it has an outcome that isn't `pending`. "Up next" is the earliest
 // outstanding round by round number — not array position, and not "the last one", so a loop where

@@ -3,7 +3,7 @@
  * pipeline: every posting Status and the CoWork job / event that drives each
  * transition. This is the app's actual workflow, not its import structure.
  *
- * Source of truth for the STATES is the real `Status` union (lib/types.ts) —
+ * Source of truth for the STATES is the real `Status` union (shared/src/types.ts) —
  * imported below, so a renamed/added/removed status fails this script loudly
  * instead of silently drifting. The TRANSITIONS are declared here because the
  * triggers live in imperative code; each is annotated with where it's enforced.
@@ -12,7 +12,7 @@
  * locally via `npm run diagram:pipeline`.
  */
 import { STATUS_ORDER, type Status } from "@landed/shared/types";
-import { STATUS_LABEL } from "@landed/shared/pipeline";
+import { STATUS_LABEL } from "@landed/shared/pipeline/stages";
 import { writeDiagramDoc } from "./diagram-doc";
 
 const START = "[*]";
@@ -44,7 +44,7 @@ for (const t of TRANSITIONS) {
 }
 const unknown = [...referenced].filter((s) => !known.has(s));
 if (unknown.length) {
-  throw new Error(`pipeline diagram references unknown status(es): ${unknown.join(", ")}. ` + `Update scripts/gen-pipeline-diagram.ts to match lib/types.ts.`);
+  throw new Error(`pipeline diagram references unknown status(es): ${unknown.join(", ")}. ` + `Update scripts/gen-pipeline-diagram.ts to match shared/src/types.ts.`);
 }
 const uncovered = STATUS_ORDER.filter((s) => !referenced.has(s));
 if (uncovered.length) {
@@ -70,7 +70,7 @@ writeDiagramDoc({
   out: "docs/pipeline.md",
   title: "Application pipeline",
   source:
-    "States come from the Status union in lib/types.ts; transitions are declared in " +
+    "States come from the Status union in shared/src/types.ts; transitions are declared in " +
     "scripts/gen-pipeline-diagram.ts (each annotated with where the rule lives). " +
     "Run `npm run diagram:pipeline` to regenerate.",
   intro:

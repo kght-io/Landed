@@ -37,7 +37,7 @@ export const JOB_VERB: Record<string, string> = {
 };
 export const jobVerb = (type: string) => JOB_VERB[type] ?? type;
 
-// Playbook file each type follows (mirrors lib/jobs/registry.ts JOB_DEFS.playbook) — client-safe, so
+// Playbook file each type follows (mirrors backend/src/jobs/registry.ts JOB_DEFS.playbook) — client-safe, so
 // the type-scoped "copy prompt" can name the exact instructions/<file> for the chosen queue.
 export const JOB_PLAYBOOK: Record<string, string> = {
   "watchlist-add": "watchlist-add.md", leveling: "leveling.md", "watchlist-scan": "watchlist-scan.md",
@@ -50,6 +50,13 @@ export const jobPlaybook = (type: string) => JOB_PLAYBOOK[type] ?? `${type}.md`;
 // orange = overloaded → trim or clear it before it balloons (heavy types like fit/tailoring are slow
 // per job, so a deep queue is a real backlog). Static colour only — blinking is reserved for the
 // has-WIP signal (see wipBlink). Shared by the floating queue + the Agents page.
+const HOUR_MS = 3_600_000;
+// How long a Done job lingers in a queue list after completion before dropping off. Fit runs in
+// bursts, so keep its finished jobs visible for a full day; other types clear after an hour.
+// Lives here with the other queue presentation tokens rather than inside one component — it is a
+// display policy shared by every surface that renders the ledger.
+export const doneRetentionMs = (type: string) => (type === "fit" ? 24 * HOUR_MS : HOUR_MS);
+
 export const QUEUE_WARN = 12; // light orange
 export const QUEUE_HEAVY = 30; // dark orange
 export function loadTone(n: number): string {

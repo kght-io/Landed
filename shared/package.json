@@ -4,7 +4,7 @@
   "private": true,
   "description": "Client-safe code: domain types, pure logic, and formatting shared by the UI and the server. Must never import node builtins, a DB driver, or @landed/backend.",
   "exports": {
-    "./targets.mjs": "./src/targets.mjs",
+    "./config/targets.mjs": "./src/config/targets.mjs",
     "./*": "./src/*.ts"
   }
 }

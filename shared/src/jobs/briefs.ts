@@ -1,9 +1,9 @@
 import type { BriefGap, BriefSource, InterviewBrief, SourcedText } from "../types";
-import { str } from "../coerce";
+import { str } from "../util/coerce";
 
 // Helpers for the posting interview-brief history (postings.interview_briefs). One JSON
 // InterviewBrief[] holds every generated version, oldest → newest; each generation appends a new
-// version (like a RedoTurn agent turn). Mirrors lib/jobs/redolog.ts for the résumé/fit thread.
+// version (like a RedoTurn agent turn). Mirrors shared/src/jobs/redolog.ts for the résumé/fit thread.
 
 export function parseBriefs(raw: string | null | undefined): InterviewBrief[] {
   if (!raw) return [];

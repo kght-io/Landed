@@ -3,20 +3,32 @@
 import { db } from "@landed/backend/db";
 import {
   postings, companies, events, interviews, jobs, appConfig, agentRuns, pendingMatches, todos,
+  threads, threadSteps,
 } from "@landed/backend/db/schema";
 import type { Status } from "@landed/shared/types";
 import { listPendingMatches } from "@landed/backend/db/queries";
 import { resolvePendingMatch } from "@landed/backend/agents/reconcile";
 
-export { db, postings, companies, events, jobs };
+export { db, postings, companies, events, jobs, threads, threadSteps };
 
 // Wipe all rows between tests. (The job queue + ledger live in the `jobs` table now —
 // there are no queue/result/context files to clean.)
 export function reset() {
   // Children before parents — interviews FK→postings, postings FK→companies — so FK enforcement
   // (foreign_keys=ON) doesn't reject the deletes once interview rows actually exist.
-  for (const t of [interviews, postings, pendingMatches, events, jobs, agentRuns, appConfig, todos]) db.delete(t).run();
+  // threadSteps before threads for the same reason (by convention — they're linked by id, not an FK).
+  for (const t of [interviews, postings, pendingMatches, events, jobs, agentRuns, appConfig, todos, threadSteps, threads]) db.delete(t).run();
   db.delete(companies).run();
+}
+
+// Register an agent session (thread) whose last MCP call was `minutesAgo` minutes ago.
+// reapStuckJobs treats a thread silent for more than HEARTBEAT_SILENCE_MS (15 min) as a dead
+// session and reclaims the job it was holding — the FAST abandonment signal, well inside the
+// 60-min claim lease. Pass 0 for a thread that just pinged.
+export function seedThread(id: string, minutesAgo = 0): string {
+  const seen = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  db.insert(threads).values({ id, label: id, pid: null, startedAt: seen, lastSeenAt: seen, steps: 1 }).run();
+  return id;
 }
 
 // Seed a company (created once per name) + one tracker posting (a candidate in a tracker stage);

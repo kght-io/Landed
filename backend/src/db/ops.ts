@@ -1,12 +1,10 @@
 import fs from "node:fs";
-import path from "node:path";
 import { db } from "./index";
 import { jobs } from "./schema";
-import { getConfig } from "./config-store";
-import { INBOX_SYNCED_KEY, isStaleClaimAt } from "../jobs/store";
-import { runDir } from "../agents/run-log";
+import { getConfig, INBOX_SYNCED_KEY } from "./config-store";
+import { isStaleClaimAt } from "@landed/shared/jobs/lease";
 import { repoPath } from "../paths";
-import { queueTone, syncTone, worstTone, type OpsTone } from "@landed/shared/ops";
+import { queueTone, syncTone, worstTone, type OpsTone } from "@landed/shared/format/ops";
 
 // "Is the machine working?" — answered from what the app already records, so nothing new has to be
 // collected and no telemetry leaves the box. The pipeline pages answer "how is the job search
@@ -116,39 +114,8 @@ export function opsSnapshot(now: Date = new Date()): OpsSnapshot {
 
 // ------------------------------------------------------------------ on-disk state (fs, not the DB)
 
-export type OpsAgentRun = { type: string; lastRunAt: string | null; live: boolean; bytes: number };
-
-// One journal per agent TYPE, overwritten at each launch (see run-log.ts). mtime is therefore "when
-// that agent last ran", and a live pid file means it's running right now.
-export function agentRuns(): OpsAgentRun[] {
-  const dir = runDir();
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return []; // no runs yet — the dir is created lazily on first launch
-  }
-  const out: OpsAgentRun[] = [];
-  for (const name of names) {
-    if (!name.endsWith(".jsonl")) continue;
-    const type = name.slice(0, -".jsonl".length);
-    try {
-      const st = fs.statSync(path.join(dir, name));
-      let live = false;
-      try {
-        const pid = Number(fs.readFileSync(path.join(dir, `${type}.pid`), "utf8").trim());
-        // signal 0 tests for existence without touching the process
-        if (Number.isFinite(pid) && pid > 0) { process.kill(pid, 0); live = true; }
-      } catch {
-        live = false; // no pid file, or the process is gone
-      }
-      out.push({ type, lastRunAt: st.mtime.toISOString(), live, bytes: st.size });
-    } catch {
-      // a journal that vanished mid-read isn't worth failing the whole view over
-    }
-  }
-  return out.sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? ""));
-}
+// Agent run journals moved to ../agents/run-log (agentRunFiles) — they're filesystem state, not DB
+// state, and reading them from here made `db` depend on `agents`. The ops route composes the two.
 
 export type OpsFile = { label: string; path: string; bytes: number; note?: string };
 

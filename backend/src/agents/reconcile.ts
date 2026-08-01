@@ -3,9 +3,9 @@ import { db } from "../db";
 import { companies, postings, pendingMatches } from "../db/schema";
 import type { PostingRow, CompanyRow } from "../db/schema";
 import { logEvent, createPendingMatch, createPendingChange, upsertInterviews } from "../db/queries";
-import type { FieldDiff } from "@landed/shared/change-format";
-import { TRACKER_STAGES } from "@landed/shared/pipeline";
-import { maybeQueuePrepResearch } from "../jobs/store";
+import type { FieldDiff } from "@landed/shared/format/change";
+import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
+import { emitStageChange } from "../db/stage-change";
 import { canonical, defaultTier } from "@landed/shared/agents/canonical";
 import { matchPosting, interviewNarrowed, type MatchResult } from "@landed/shared/agents/match";
 import type { IncomingApp, ReconcileResult } from "@landed/shared/agents/types";
@@ -109,8 +109,9 @@ function applyIncoming(
   changes.updatedAt = rec.updatedAt ?? today();
   db.update(postings).set(changes as Partial<typeof postings.$inferInsert>).where(eq(postings.id, match.id)).run();
   Object.assign(match, changes); // reflect in the pool so later records match the new values
-  // Reaching the interview stage via sync auto-queues prep research (one-shot per company).
-  if (changes.state === "interview") maybeQueuePrepResearch(match.companyId, prevStage, "interview");
+  // Reaching the interview stage via sync earns prep research (one-shot per company) — announced,
+  // not enqueued from here; the jobs layer subscribes. See ../db/stage-change.ts.
+  if (changes.state === "interview") emitStageChange({ companyId: match.companyId, from: prevStage, to: "interview" });
   // One event per field changed — the actor (the agent for inbox-sync) wrote these.
   const subject = `${opts.companyName} — ${match.title ?? rec.role ?? "?"}`;
   for (const d of fieldDiffs) {

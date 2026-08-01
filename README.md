@@ -80,7 +80,7 @@ the biggest drivers of how the app assesses fit:
   base résumé (.docx) auto-adopts its text as your candidate profile.
 - **Target companies** — the list that decides whether a newly-seen company starts in the
   "target" vs "practice" tier. It's a single starter list in
-  [shared/src/targets.mjs](shared/src/targets.mjs) — edit it for your own search. (You can also re-tier any
+  [shared/src/config/targets.mjs](shared/src/config/targets.mjs) — edit it for your own search. (You can also re-tier any
   company in the UI regardless.) The leveling anchor ladder defaults to Amazon's and is
   swappable on the **Settings** page.
 

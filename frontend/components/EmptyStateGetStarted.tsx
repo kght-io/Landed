@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Rocket } from "lucide-react";
-import { onboardingAllDone, OPEN_GETSTARTED_EVENT, type OnboardingStatus } from "@landed/shared/onboarding-shared";
+import { onboardingAllDone, OPEN_GETSTARTED_EVENT, type OnboardingStatus } from "@landed/shared/onboarding";
 
 // The empty-table placeholder. For a not-yet-set-up install it also offers a "Get started" button that
 // re-opens the onboarding checklist (its progress is saved). Once setup is complete it's just the

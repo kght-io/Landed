@@ -3,11 +3,11 @@
 // everything else starts in tier3 (the broad "practice" pool). The tier is only a *default* —
 // you can always re-tier any company in the UI (drag-drop) regardless of this list.
 //
-// Keys are normalized: lowercase, alphanumeric only (see norm() in lib/agents/canonical.ts),
+// Keys are normalized: lowercase, alphanumeric only (see norm() in agents/canonical.ts),
 // so "Hugging Face" and "huggingface" both match the key "huggingface".
 //
 // This is a STARTER list of well-known engineering orgs — CUSTOMIZE it for your own search.
-// Shared by the app (lib/agents/canonical.ts) and the import/reconcile scripts so there's
+// Shared by the app (agents/canonical.ts) and the import/reconcile scripts so there's
 // one source of truth.
 export const TARGET_KEYS = [
   "google", "meta", "netflix", "apple", "microsoft", "anthropic",

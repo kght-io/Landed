@@ -1,4 +1,5 @@
-import { opsSnapshot, agentRuns, storageUsage } from "@landed/backend/db/ops";
+import { opsSnapshot, storageUsage } from "@landed/backend/db/ops";
+import { agentRunFiles } from "@landed/backend/agents/run-log";
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 // The fs readers are composed here rather than inside opsSnapshot so the snapshot stays hermetic.
 export async function GET() {
   try {
-    return Response.json({ ...opsSnapshot(), agents: agentRuns(), storage: storageUsage() });
+    return Response.json({ ...opsSnapshot(), agents: agentRunFiles(), storage: storageUsage() });
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 500 });
   }

@@ -5,7 +5,7 @@ import { reset, db, jobs } from "./helpers";
 import { appConfig } from "@landed/backend/db/schema";
 import { INBOX_SYNCED_KEY } from "@landed/backend/jobs/store";
 import { opsSnapshot } from "@landed/backend/db/ops";
-import { worstTone, queueTone, syncTone, QUEUE_SLOW_MS, QUEUE_STUCK_MS, SYNC_DUE_MS, SYNC_LATE_MS } from "@landed/shared/ops";
+import { worstTone, queueTone, syncTone, QUEUE_SLOW_MS, QUEUE_STUCK_MS, SYNC_DUE_MS, SYNC_LATE_MS } from "@landed/shared/format/ops";
 
 // A fixed "now" so every age is deterministic regardless of when the suite runs.
 const NOW = new Date("2026-07-30T12:00:00Z");

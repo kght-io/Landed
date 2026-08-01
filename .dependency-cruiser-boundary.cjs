@@ -6,13 +6,28 @@
  * modules into folder boxes and filters the graph down to our own source, both of which make
  * these rules unable to fire. Rules need the full, uncollapsed graph — node builtins included.
  *
- * The three invariants:
+ * The four invariants:
  *   backend -/-> frontend   the backend never reaches into the frontend
  *   shared -/-> backend     (at runtime — type-only imports are erased, so they're allowed)
  *   shared -/-> node        shared ships to the browser
+ *   no import cycles        every module can be read, tested, and moved on its own
  */
 module.exports = {
   forbidden: [
+    {
+      name: "no-circular",
+      severity: "error",
+      comment:
+        "An import cycle means there is no bottom: to understand any module in the ring you have " +
+        "to understand all of them, and none can be tested or moved alone. In ESM they also fail " +
+        "at RUNTIME — a module half-way through evaluation hands out undefined exports — but only " +
+        "once something crossing the ring is read at import time rather than called later. Cycles " +
+        "of plain function references therefore work by accident and accumulate silently until one " +
+        "top-level `const` detonates at startup. backend/src/{db,jobs,agents} were a ring of exactly " +
+        "that shape; see backend/src/db/stage-change.ts for how the last edge was inverted.",
+      from: {},
+      to: { circular: true },
+    },
     {
       name: "backend-not-to-frontend",
       severity: "error",

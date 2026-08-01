@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Clock, History } from "lucide-react";
-import { STATUS_LABEL, STATUS_CHIP } from "@landed/shared/pipeline";
+import { STATUS_LABEL, STATUS_CHIP } from "@landed/shared/pipeline/stages";
 import type { Status } from "@landed/shared/types";
 
 export type TrackerItem = { role: string; status: string; date?: string; appliedDate?: string; interviewed?: boolean };

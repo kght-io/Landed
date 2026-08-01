@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { FolderOpen, GitCompareArrows, Loader2, X } from "lucide-react";
 import RedoComposer from "@/components/RedoComposer";
-import type { DiffOp } from "@landed/shared/linediff";
+import type { DiffOp } from "@landed/shared/util/linediff";
 
 type DiffResult = { ok: true; slug: string; base: string; added: number; removed: number; ops: DiffOp[] } | { error: string };
 

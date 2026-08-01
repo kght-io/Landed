@@ -1,6 +1,6 @@
 import type { EmailRefs, InterviewKind, Interviewer, InterviewRound, Status } from "../../types";
-import { str, warningLog } from "../../coerce";
-import type { CoerceWarning, WarningLog } from "../../coerce";
+import { str, warningLog } from "../../util/coerce";
+import type { CoerceWarning, WarningLog } from "../../util/coerce";
 import type { IncomingApp } from "../types";
 
 // inbox-sync statuses -> our pipeline enum. (No 'offer' status yet → treat as in-process.)

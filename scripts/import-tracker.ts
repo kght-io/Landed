@@ -5,9 +5,9 @@ import { db } from "@landed/backend/db";
 import { companies, postings } from "@landed/backend/db/schema";
 import { eq, sql, inArray } from "drizzle-orm";
 import { PATHS } from "@landed/backend/config";
-import { TRACKER_STAGES } from "@landed/shared/pipeline";
+import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 import { norm } from "@landed/shared/agents/canonical";
-import { isTarget } from "@landed/shared/targets.mjs";
+import { isTarget } from "@landed/shared/config/targets.mjs";
 
 const tierFor = (name: string) =>
   isTarget(norm(name)) ? "tier2" : "tier3";

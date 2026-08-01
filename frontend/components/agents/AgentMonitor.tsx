@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CheckCircle2, XCircle, Loader2, Clock, ChevronRight } from "lucide-react";
-import { ago } from "@landed/shared/format";
+import { ago } from "@landed/shared/format/time";
 import { actorLabel } from "@/components/jobMeta";
 
 // One job-ledger row — the durable record of a unit of agent work (the real observability source,

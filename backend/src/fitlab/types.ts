@@ -1,6 +1,6 @@
 // Fit Lab — shared types. The lab models fit assessment as a production classification pipeline;
-// these types are the contract between the assess pipeline (lib/fitlab/assess.ts), the store, the
-// API routes, and the UI. See lib/fitlab/README intent in lib/db/schema.ts.
+// these types are the contract between the assess pipeline (backend/src/fitlab/decide.ts), the store, the
+// API routes, and the UI. See the intent note in backend/src/db/schema.ts.
 
 export type CriterionType = "gate" | "must" | "nice" | "signal";
 // A graded verdict, not a bare boolean — "partial"/"unclear" carry the ambiguity the model actually

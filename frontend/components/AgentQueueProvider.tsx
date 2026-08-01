@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import type { JobView } from "@landed/backend/jobs/queue";
 
 // Dispatched on `window` when the queue is cleared (detail.type = one agent, or undefined = all), so
 // the separately-polled queue panel + card badge can empty immediately instead of waiting for a poll.
@@ -8,17 +9,10 @@ export const QUEUE_CLEARED_EVENT = "landed:queue-cleared";
 
 // A live agent job, as the floating queue + Agents page see it — `queued` (up for grabs) or `wip`
 // (an agent claimed it; has claimedAt). Ingested/history rows are excluded.
-export type QueueJob = {
-  id: string;
-  type: string;
-  createdBy: string;
-  createdAt: string;
-  status: string; // queued | wip
-  claimedAt?: string | null;
-  claimedBy?: string | null;
-  task?: string | null;
-  params?: Record<string, unknown>;
-};
+// The server's own view of a job, not a hand-maintained copy of it — a redeclared shape here drifts
+// silently the moment a field is added or derived differently on the backend. Type-only, so nothing
+// from the backend ends up in the browser bundle.
+export type QueueJob = JobView;
 
 export type AddJobSpec = { type: string; params?: Record<string, unknown>; task?: string };
 
@@ -116,7 +110,9 @@ export default function AgentQueueProvider({ children }: { children: React.React
     setJobs((js) => js.filter((j) => !ids.includes(j.id))); // optimistic (floating queue)
     window.dispatchEvent(new CustomEvent(QUEUE_CLEARED_EVENT, { detail: { type } }));
     try {
-      await Promise.all(ids.map((id) => fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE" })));
+      // One request, not one per job: the server decides what's cancellable and runs each type's
+      // un-queue hooks. Fanning N deletes out from here could leave the queue half-cleared.
+      await fetch(`/api/jobs${type ? `?type=${encodeURIComponent(type)}` : ""}`, { method: "DELETE" });
     } finally {
       refresh();
     }
@@ -136,20 +132,18 @@ export default function AgentQueueProvider({ children }: { children: React.React
 
   const bump = useCallback(() => { firePulse(); refresh(); }, [firePulse, refresh]);
 
-  const redoNoteFor = useCallback((postingId: string, phase: "fit" | "tailor"): string | null => {
-    const id = phase === "tailor" ? `tailoring-app-${postingId}` : `fit-redo-${postingId}`;
-    const note = jobs.find((j) => j.id === id)?.params?.redoNote;
-    return typeof note === "string" ? note : null;
-  }, [jobs]);
-
-  // The live job for a posting's phase (tailor: stable id; fit: the redo id, else any fit job whose
-  // params carry this posting). `jobs` holds only outstanding rows (queued + wip).
+  // The live job for a posting's phase. Matched on the `postingId`/`phase` the server derives for
+  // every job (see JobView in backend/src/jobs/queue.ts) rather than rebuilding the id convention
+  // (`tailoring-app-42`, `fit-redo-42`) here — those ids are minted in backend/src/jobs/enqueue/*,
+  // and a change there used to break this matching silently. `jobs` holds only outstanding rows.
   const jobFor = useCallback((postingId: string, phase: "fit" | "tailor"): QueueJob | undefined =>
-    phase === "tailor"
-      ? jobs.find((j) => j.id === `tailoring-app-${postingId}`)
-      : jobs.find((j) => j.id === `fit-redo-${postingId}`)
-        ?? jobs.find((j) => j.type === "fit" && (j.params?.postings as { id?: unknown }[] | undefined)?.some((p) => String(p?.id) === postingId)),
+    jobs.find((j) => j.phase === phase && j.postingId != null && String(j.postingId) === postingId),
   [jobs]);
+
+  const redoNoteFor = useCallback((postingId: string, phase: "fit" | "tailor"): string | null => {
+    const note = jobFor(postingId, phase)?.params?.redoNote;
+    return typeof note === "string" ? note : null;
+  }, [jobFor]);
   // Claimed (wip = being worked now) vs merely outstanding (queued or wip).
   const isWorking = useCallback((postingId: string, phase: "fit" | "tailor"): boolean => jobFor(postingId, phase)?.status === "wip", [jobFor]);
   const isQueued = useCallback((postingId: string, phase: "fit" | "tailor"): boolean => !!jobFor(postingId, phase), [jobFor]);

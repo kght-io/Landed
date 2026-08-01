@@ -3,7 +3,7 @@
 //   npm run prep:export
 //
 // Writes <ASSET_ROOT>/interview-prep/<slug>/context.md for every company in the interview/offer
-// stage, plus a README index. The generation lives in lib/prep/export-context.ts (shared with the
+// stage, plus a README index. The generation lives in backend/src/prep/export-context.ts (shared with the
 // in-app per-company "Dump context" button). Idempotent — re-run any time to refresh.
 import { exportAllPrepContext, PREP_ROOT } from "@landed/backend/prep/export-context";
 

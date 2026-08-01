@@ -1,8 +1,8 @@
 import type { FitGap, Posting, Status } from "@landed/shared/types";
 import {
   fitColor, reapplyInfo, STATUS_LABEL, STATUS_CHIP, CHIP_ORDER,
-} from "@landed/shared/pipeline";
-import type { GroupReapply } from "@landed/shared/board";
+} from "@landed/shared/pipeline/stages";
+import type { GroupReapply } from "@landed/shared/pipeline/board";
 
 export function FitBadge({ score, size = "sm" }: { score: number; size?: "sm" | "lg" }) {
   return (

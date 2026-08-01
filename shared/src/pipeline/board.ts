@@ -1,7 +1,7 @@
 // Pure domain logic for the board views — grouping, aggregation, reapply rollups.
 // No React here, so it's easy to test and reuse.
-import type { Posting, Status, Tier } from "./types";
-import { reapplyInfo } from "./pipeline";
+import type { Posting, Status, Tier } from "../types";
+import { reapplyInfo } from "./stages";
 
 // TODO: make this the real date once the app isn't seeded with fixed-date data.
 export const TODAY = "2026-06-19";

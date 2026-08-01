@@ -5,8 +5,8 @@
 // assessment, the JD, and the researched prep profile + question set. The point: open one the agent
 // chat per company, point it at that folder, and prep with the full context already on disk.
 //
-// Reads postings/interviews via Drizzle directly (NOT lib/db/queries) so it stays decoupled from the
-// job-queue code; it reuses lib/db/prep for the researched profile + question folding. Shared by the
+// Reads postings/interviews via Drizzle directly (NOT backend/src/db/queries) so it stays decoupled from the
+// job-queue code; it reuses backend/src/db/prep for the researched profile + question folding. Shared by the
 // CLI (`npm run prep:export`) and the in-app per-company "Dump context" button.
 import fs from "node:fs";
 import path from "node:path";

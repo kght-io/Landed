@@ -2,11 +2,11 @@
 // Foundation phase: this drives the UI from in-memory state. Plumbing (SQLite,
 // scrapers, AI fit scoring, bundle export) gets wired behind these same shapes later.
 
-import type { Leveling } from "./leveling";
-import type { DiffOp } from "./linediff";
+import type { Leveling } from "./config/leveling";
+import type { DiffOp } from "./util/linediff";
 
 // Company tier, best → broadest. Stored as stable slugs (tier1/tier2/tier3); human labels
-// live in TIER_META (lib/pipeline.ts). tier1 = top target, tier3 = the broad practice pool.
+// live in TIER_META (pipeline/stages.ts). tier1 = top target, tier3 = the broad practice pool.
 export type Tier = "tier1" | "tier2" | "tier3";
 
 // The pipeline stages, left-to-right. tier3 (practice) postings can jump straight

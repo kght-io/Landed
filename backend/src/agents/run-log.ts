@@ -84,3 +84,34 @@ export function readLivePid(type: string): number | null {
     return null;
   }
 }
+
+export type AgentRunFile = { type: string; lastRunAt: string | null; live: boolean; bytes: number };
+
+// "When did each agent last run, and is one running now?" — read from the journals themselves.
+// One journal per agent TYPE, overwritten at each launch, so mtime IS "when that agent last ran"
+// and a live pid file means it's running right now.
+//
+// This lives here rather than in db/ops.ts (which surfaces it) because it reads the filesystem, not
+// the database — and having `db` reach into `agents` for runDir was one edge of the
+// db ↔ jobs ↔ agents cycle. It also gets to reuse readLivePid instead of re-implementing the probe.
+export function agentRunFiles(): AgentRunFile[] {
+  const dir = runDir();
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return []; // no runs yet — the dir is created lazily on first launch
+  }
+  const out: AgentRunFile[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".jsonl")) continue;
+    const type = name.slice(0, -".jsonl".length);
+    try {
+      const st = fs.statSync(path.join(dir, name));
+      out.push({ type, lastRunAt: st.mtime.toISOString(), live: readLivePid(type) != null, bytes: st.size });
+    } catch {
+      // a journal that vanished mid-read isn't worth failing the whole view over
+    }
+  }
+  return out.sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? ""));
+}

@@ -3,7 +3,7 @@ import { db } from "./index";
 import { prepQuestions, prepAttempts, prepProgress, prepCompany, prepFeedback } from "./schema";
 import type { PrepQuestionRow, PrepAttemptRow, PrepCompanyRow, PrepFeedbackRow } from "./schema";
 import { canonical, norm } from "@landed/shared/agents/canonical";
-import { str, num } from "@landed/shared/coerce";
+import { str, num } from "@landed/shared/util/coerce";
 import type { ChangeDetail } from "@landed/shared/agents/types";
 import { parseLeetcodeUrl } from "@landed/shared/prep/leetcode";
 

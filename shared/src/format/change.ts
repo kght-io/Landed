@@ -5,8 +5,8 @@
 // The raw form is deliberately terse (`status applied→interview`, `appliedDate ∅→2026-06-25`) because
 // it's what the audit log stores; nothing outside this file should render it to a person.
 
-import { STATUS_LABEL } from "./pipeline";
-import type { Status } from "./types";
+import { STATUS_LABEL } from "../pipeline/stages";
+import type { Status } from "../types";
 
 // One field-level change: the column, its previous value, its proposed/new value. Either side may be
 // absent — a blank `old` means the field was empty, a blank `new` means it's being cleared.

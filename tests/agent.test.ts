@@ -490,15 +490,27 @@ test("queueStaleWatchlistScans queues only stale, watchlisted companies — idem
   assert.equal(r2.skipped, 2);
 });
 
-test("closing a watchlist-scan job stamps the company's lastScrapedAt (so it isn't re-queued)", () => {
+// `lastScrapedAt` means "we actually read this company's board", and scanCompany is the only thing
+// that can know that — it stamps on success and deliberately skips the stamp when the fetch throws.
+// Closing the JOB is not evidence of a scrape: the agent can close one whose scanCompany errored or
+// never ran. submitJobResult used to stamp anyway, which marked a company scraped that wasn't, and
+// hid a broken board behind a fresh-looking timestamp.
+test("closing a watchlist-scan job does NOT stamp lastScrapedAt — only a real scan does", () => {
   db.insert(companies).values({ name: "ScanMe", tier: "tier3", watchlist: true, lastScrapedAt: null }).run();
   queueStaleWatchlistScans(3);
   const job = listJobs().find((j) => j.type === "watchlist-scan" && j.params?.company === "ScanMe")!;
   claimJob(job.id, "agent-A"); // submit gate requires a live lease
-  submitJobResult({ type: "watchlist-scan", jobId: job.id, records: [] }); // empty close
+  submitJobResult({ type: "watchlist-scan", jobId: job.id, records: [] }); // empty close, no scan
   const co = db.select().from(companies).where(eq(companies.name, "ScanMe")).get()!;
-  assert.ok(co.lastScrapedAt, "lastScrapedAt stamped");
-  assert.equal(queueStaleWatchlistScans(3).queued, 0, "no longer stale → not re-queued");
+  assert.equal(co.lastScrapedAt, null, "never scraped → never stamped");
+  // …so the next "Scrape watchlist" click picks it up again, which is what you'd want: it still
+  // hasn't been read. (The sweep is button-driven, not polled, so this can't spin on its own.)
+  assert.equal(queueStaleWatchlistScans(3).queued, 1, "still stale → re-queued on the next click");
+});
+
+test("a company scanCompany DID stamp is treated as fresh and left alone", () => {
+  db.insert(companies).values({ name: "Scraped", tier: "tier3", watchlist: true, lastScrapedAt: new Date().toISOString() }).run();
+  assert.equal(queueStaleWatchlistScans(3).queued, 0);
 });
 
 // --- the daily inbox-sync is queued at most once per day, enforced server-side ---------------

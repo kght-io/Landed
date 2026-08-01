@@ -35,6 +35,11 @@ export type ReconcileResult = {
   flagged: number;
   pending: number; // ambiguous matches parked for human approval
   newCompanies: number;
+  // Records that never reached a group because their company wouldn't canonicalize. Counted rather
+  // than dropped in silence — otherwise a run that lost records reports the same "nothing new" as a
+  // run that genuinely found none. Optional because only reconcile() groups by company; the
+  // id-matched ingests (fit, tailoring, peer-comp, …) have no way to skip.
+  skipped?: number;
   summary: string;
   details?: ChangeDetail[]; // per-row, for the preview
 };

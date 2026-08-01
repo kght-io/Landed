@@ -56,9 +56,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (outstandingFitJobId(r.fit.id)) {
       return Response.json({ ...r, fitAlreadyQueued: true });
     }
-    // The existing HOLISTIC fit job. A STABLE per-posting id also makes a repeat overwrite in place.
+    // The existing HOLISTIC fit job. The STABLE per-posting id (shared with every other fit path —
+    // the JD-add, the self-heal reconciler, a redo) makes a repeat overwrite in place.
     createJob({
-      id: `fit-cand-${r.fit.id}`,
+      id: `fit-${r.fit.id}`,
       type: "fit",
       createdBy: "You",
       task: "Assess fit for the posting below. Use the JD in params if present, else fetch it from the URL; then score per fit.md.",

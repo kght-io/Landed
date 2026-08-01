@@ -1,4 +1,4 @@
-import { listJobs, inboxLastSynced, agentContext, createJob, reconcileFitQueue, reconcileTailoringQueue, reapStuckJobs } from "@landed/backend/jobs/store";
+import { listJobs, inboxLastSynced, agentContext, createJob, enqueueInboxSync, reconcileFitQueue, reconcileTailoringQueue, reapStuckJobs } from "@landed/backend/jobs/store";
 import { JOB_DEFS, jobDef } from "@landed/backend/jobs/registry";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +60,14 @@ export async function POST(request: Request) {
   if (!body.type || !jobDef(body.type))
     return Response.json({ error: `unknown or missing job type: ${body.type}` }, { status: 400 });
   try {
-    const id = createJob({ type: body.type, params: body.params, task: body.task, createdBy: body.createdBy });
+    // An inbox-sync needs its search window (`params.since`) or the agent has to guess it — and
+    // neither client here can compute it (the watermark is server state). Fill it in unless the
+    // caller named its own window. This is the seam both the Sync-inbox button and the agent's
+    // createJob MCP tool come through.
+    const id =
+      body.type === "inbox-sync" && !body.params?.since && !body.task
+        ? enqueueInboxSync({ createdBy: body.createdBy })
+        : createJob({ type: body.type, params: body.params, task: body.task, createdBy: body.createdBy });
     return Response.json({ id });
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 400 });

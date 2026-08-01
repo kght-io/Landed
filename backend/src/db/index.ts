@@ -389,7 +389,7 @@ function connection() {
   // Structural CREATE/ALTER above is idempotent and runs every boot; these rewrite *data*, so we
   // gate them on PRAGMA user_version to run once (not on every connection) and to make ordering
   // explicit. Each is also idempotent on its own — the gate is belt-and-suspenders.
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const userVersion = sqlite.pragma("user_version", { simple: true }) as number;
   if (userVersion < 1) {
     // v1: tier values renamed top_target/target/practice → tier1/tier2/tier3 (stable slugs).
@@ -403,6 +403,29 @@ function connection() {
     sqlite.exec("UPDATE postings SET state='matched'  WHERE state='new' AND verdict='kept'");
     sqlite.exec("UPDATE postings SET state='filtered' WHERE state='new' AND verdict='dropped'");
     sqlite.exec("UPDATE postings SET state='tailored' WHERE state='tailoring' AND resume_dir IS NOT NULL");
+  }
+  if (userVersion < 2) {
+    // v2: fit jobs collapsed onto ONE stable id per posting (`fit-<postingId>`). They used to be
+    // minted per path — fit-app-<ts36> (JD-add), fit-cand-<id> (funnel), fit-<ts36> (reconciler),
+    // fit-redo-<id> (redo) — so one posting could sit in the queue several times over and get
+    // scored twice. Rename the still-PENDING rows onto the canonical id rather than dropping them,
+    // so a queued redo survives the upgrade (only a fit_queue candidate would be re-created by
+    // reconcileFitQueue; an `assessed` posting's redo has no reconciler to rescue it).
+    // OR REPLACE collapses the duplicates: several legacy rows for one posting → the last wins.
+    // Ingested rows are history and are left alone.
+    const canonical = "'fit-' || json_extract(params, '$.postings[0].id')";
+    sqlite.exec(
+      `UPDATE OR REPLACE jobs SET id = ${canonical}
+         WHERE type='fit' AND status IN ('queued','wip')
+           AND json_extract(params, '$.postings[0].id') IS NOT NULL
+           AND id <> ${canonical}`,
+    );
+    // Legacy pending rows that never carried a posting id can't be mapped — drop them;
+    // reconcileFitQueue re-creates one for any candidate still parked in fit_queue.
+    sqlite.exec(
+      "DELETE FROM jobs WHERE type='fit' AND status IN ('queued','wip') " +
+        "AND json_extract(params, '$.postings[0].id') IS NULL",
+    );
   }
   if (userVersion < SCHEMA_VERSION) sqlite.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 

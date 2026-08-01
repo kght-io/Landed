@@ -104,6 +104,31 @@ test("a fresher proposal for the same posting replaces the stale card rather tha
   assert.equal(stateOf(id), "interview");
 });
 
+// --- the boundary covers the COMPANY row too --------------------------------------------------
+
+const companyNames = () => db.select().from(companies).all().map((c) => c.name);
+
+test("a sync never renames a tracked company — the agent's spelling isn't applied unapproved", () => {
+  const id = seedApp({ company: "OpenAI", role: "Member of Technical Staff", status: "applied" });
+
+  // Same company, the agent's own casing. It must still MATCH (canonical key), but not rewrite the
+  // stored name — one hallucinated spelling would otherwise silently rename a tracked company.
+  sync([{ company: "openai", role: "Member of Technical Staff", status: "interviewing" }]);
+
+  assert.deepEqual(companyNames(), ["OpenAI"], "stored name untouched");
+  const [p] = listPendingMatches();
+  assert.equal(p.companyName, "OpenAI", "the card shows the tracker's spelling");
+  assert.deepEqual(p.candidates.map((c) => c.id), [id], "still matched to the same posting");
+});
+
+test("a non-approval source still normalizes the company name — the gate is what holds it back", async () => {
+  const { reconcile } = await import("@landed/backend/agents/reconcile");
+  seedApp({ company: "openai", role: "Member of Technical Staff", status: "applied" });
+
+  reconcile([{ company: "OpenAI", role: "Member of Technical Staff", status: "interview" }], { actor: "You", source: "manual" });
+  assert.deepEqual(companyNames(), ["OpenAI"], "renamed to the canonical form");
+});
+
 // --- other sources are untouched by the approval gate -----------------------------------------
 
 test("only inbox-sync needs approval — another source still reconciles directly", async () => {

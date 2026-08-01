@@ -150,14 +150,18 @@ test("fit redo keeps the prior assessment as a version", () => {
   assert.equal(p.status, "assessed");
   assert.equal(p.fitScore, 62);
 
+  // A redo re-asserts the SAME stable `fit-<postingId>` job — it's the newest instruction for that
+  // posting, so it supersedes the ingested run rather than stacking a second job the agent would
+  // score twice.
   requeueRedo(id, "fit", "Weight leadership scope over IC depth.");
-  const job = db.select().from(jobs).where(eq(jobs.id, `fit-redo-${id}`)).get()!;
+  const job = db.select().from(jobs).where(eq(jobs.id, `fit-${id}`)).get()!;
   assert.equal(job.status, "queued");
   assert.match(job.task!, /Weight leadership scope/);
   assert.equal(getPosting(id)!.status, "assessed", "a fit redo stays in the fit stage");
+  assert.equal(db.select().from(jobs).where(eq(jobs.type, "fit")).all().length, 1, "one posting → one fit job");
 
-  claimJob(`fit-redo-${id}`, "agent-A"); // submit gate requires a live lease
-  submitJobResult({ type: "fit", jobId: `fit-redo-${id}`, records: [{ id, fitScore: 78, summary: "Stronger on leadership.", recommendation: "apply" }] });
+  claimJob(`fit-${id}`, "agent-A"); // submit gate requires a live lease
+  submitJobResult({ type: "fit", jobId: `fit-${id}`, records: [{ id, fitScore: 78, summary: "Stronger on leadership.", recommendation: "apply" }] });
   p = getPosting(id)!;
   assert.equal(p.fitScore, 78, "live fitScore is the latest version");
   const log = rawLog(id);

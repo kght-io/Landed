@@ -1,5 +1,6 @@
 import type { EmailRefs, InterviewKind, Interviewer, InterviewRound, Status } from "../../types";
-import { str } from "../../coerce";
+import { str, warningLog } from "../../coerce";
+import type { CoerceWarning, WarningLog } from "../../coerce";
 import type { IncomingApp } from "../types";
 
 // inbox-sync statuses -> our pipeline enum. (No 'offer' status yet → treat as in-process.)
@@ -23,9 +24,14 @@ const KIND_MAP: Record<string, InterviewKind> = {
   hiring_manager: "hiring_manager", hm: "hiring_manager", manager: "hiring_manager",
   final: "final",
 };
-const toKind = (v: unknown): InterviewKind | undefined => {
-  const k = str(v)?.toLowerCase().replace(/[\s-]+/g, "_");
-  return k ? KIND_MAP[k] ?? "other" : undefined;
+// An ABSENT kind is normal (the caller left it out) → undefined, no warning. A kind that was given
+// but doesn't match falls back to "other" AND is reported: that's a value we misread, not one we
+// weren't told.
+const toKind = (v: unknown, log?: WarningLog, subject?: string): InterviewKind | undefined => {
+  const raw = str(v);
+  if (!raw) return undefined;
+  const k = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  return log ? log.pick(KIND_MAP, k, "other", { subject, field: "kind", value: raw }) : KIND_MAP[k] ?? "other";
 };
 const toOutcome = (v: unknown): InterviewRound["outcome"] | undefined => {
   const o = str(v)?.toLowerCase();
@@ -79,7 +85,7 @@ function toInterviewers(v: unknown): Interviewer[] | undefined {
 // Shared by both writers: inbox-sync fills the thin fields (kind/date/outcome), interview-emails
 // adds the round's substance (who, exact time, format, what to expect, how to prep). Fields the
 // caller didn't report stay undefined so upsertInterviews preserves whatever is stored.
-export function incomingRounds(raw: unknown): InterviewRound[] | undefined {
+export function incomingRounds(raw: unknown, log?: WarningLog, subject?: string): InterviewRound[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const rounds = raw
     .map((r, i): InterviewRound => {
@@ -88,7 +94,7 @@ export function incomingRounds(raw: unknown): InterviewRound[] | undefined {
       const mins = Number(o.durationMins ?? o.duration ?? o.lengthMins);
       return {
         round: Number.isFinite(n) && n > 0 ? n : i + 1,
-        kind: toKind(o.kind ?? o.type),
+        kind: toKind(o.kind ?? o.type, log, subject),
         date: str(o.date) ?? str(o.scheduledFor),
         outcome: toOutcome(o.outcome ?? o.status),
         notes: str(o.notes) ?? str(o.note),
@@ -124,16 +130,28 @@ function incomingEmailRefs(r: Record<string, unknown>): EmailRefs | undefined {
 }
 
 // Map inbox-sync result records (the JSON `results[]`) → normalized IncomingApp for reconcile.
-export function incomingFromInboxRecords(records: Record<string, unknown>[]): IncomingApp[] {
-  return records.map((r): IncomingApp => {
+//
+// Returns the warnings alongside the records: the coercion below is forgiving on purpose, but every
+// substitution it makes is something the run should be able to report rather than absorb. Reconcile
+// counts a THIRD failure mode itself (a company it can't canonicalize, which never reaches a group).
+export function incomingFromInboxRecords(
+  records: Record<string, unknown>[],
+): { records: IncomingApp[]; warnings: CoerceWarning[] } {
+  const log = warningLog();
+  const mapped = records.map((r): IncomingApp => {
     const note = str(r.note) ?? "";
+    const company = str(r.company) ?? "";
+    const subject = [company || "(no company)", str(r.role)].filter(Boolean).join(" — ");
+    const rawStatus = str(r.status);
     return {
-      company: str(r.company) ?? "",
+      company,
       role: str(r.role),
       level: str(r.level),
       team: str(r.team),
       location: str(r.location),
-      status: STATUS_MAP[String(r.status ?? "")] ?? "applied",
+      // No status at all is normal (the agent omitted it) → the plain default, silently. A status it
+      // DID send that we don't recognize is a misread, and gets reported.
+      status: rawStatus ? log.pick(STATUS_MAP, rawStatus, "applied", { subject, field: "status", value: rawStatus }) : "applied",
       interviewed: r.interviewed === true || r.interviewed === "yes",
       appliedDate: str(r.appliedDate),
       updatedAt: str(r.lastUpdate) ?? str(r.appliedDate),
@@ -142,8 +160,9 @@ export function incomingFromInboxRecords(records: Record<string, unknown>[]): In
       url: str(r.url),
       note: note || undefined,
       needsReview: /unclear if application submitted/i.test(note),
-      interviews: incomingRounds(r.interviews ?? r.rounds),
+      interviews: incomingRounds(r.interviews ?? r.rounds, log, subject),
       emailRefs: incomingEmailRefs(r),
     };
   });
+  return { records: mapped, warnings: log.list };
 }

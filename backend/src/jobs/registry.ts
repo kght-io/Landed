@@ -3,12 +3,13 @@ import { db } from "../db";
 import { companies, postings } from "../db/schema";
 import type { CompanyRow, PostingRow } from "../db/schema";
 import { logEvent, enqueueUnboundResult, upsertInterviews } from "../db/queries";
+import { setConfig, INBOX_SYNCED_KEY } from "../db/config-store";
 import { reconcile } from "../agents/reconcile";
 import { incomingFromInboxRecords, incomingRounds } from "@landed/shared/agents/sources/inbox";
 import { canonical, norm } from "@landed/shared/agents/canonical";
 import { ingestPrepRecords, ingestPrepResearch, ingestLeetcodeAdd, companySlug } from "../db/prep";
 import { exportPrepContextFor, exportQuestionsFor } from "../prep/export-context";
-import { str, num } from "@landed/shared/coerce";
+import { str, num, describeWarnings } from "@landed/shared/coerce";
 import { parseRedoLog, nextVersion } from "@landed/shared/jobs/redolog";
 import { parseBriefs, nextBriefVersion, coerceGaps, coerceSourced } from "@landed/shared/jobs/briefs";
 import { gatherPeerInputs, renderRoster } from "../peercomp/inputs";
@@ -322,6 +323,25 @@ function ingestDiscovered(source: string) {
 // addToWatchlist. The def exists so it shows as a job (with its playbook); ingest is a no-op.
 const noopIngest = (): ReconcileResult => ({ inserted: 0, updated: 0, fieldChanges: 0, flagged: 0, pending: 0, newCompanies: 0, summary: "", details: [] });
 
+// Shared body of the fit/tailoring `onUnqueue` hooks: move the posting out of the waiting stage the
+// enqueue put it in, so deleting the job actually sticks. `guard` is the extra condition that tells a
+// first-time run (which owns the stage) from a redo (which doesn't — its artifact is already live and
+// must survive the delete untouched).
+function unqueueCandidate(
+  postingId: number | null,
+  opts: { from: PostingRow["state"]; to: PostingRow["state"]; source: string; label: string; guard?: (c: PostingRow) => boolean },
+): void {
+  if (postingId == null) return;
+  const cand = db.select().from(postings).where(eq(postings.id, postingId)).get();
+  if (!cand || cand.state !== opts.from || (opts.guard && !opts.guard(cand))) return;
+  db.update(postings).set({ state: opts.to }).where(eq(postings.id, cand.id)).run();
+  const co = db.select().from(companies).where(eq(companies.id, cand.companyId)).get();
+  logEvent({
+    entity: "company", entityId: cand.companyId, action: "update", source: opts.source,
+    summary: `${co?.name ?? "?"} — ${cand.title} · un-queued from ${opts.label} (removed from the agent queue)`,
+  });
+}
+
 // Ordered by pipeline stage (ascending): create → scan → fit → tailor → inbox sync.
 // prep / prep-research keep their machinery but are hidden from the agent Jobs list for now.
 export const JOB_DEFS: Record<JobType, JobDef> = {
@@ -359,6 +379,10 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     playbook: "fit.md",
     buildTask: () => `Assess fit for the postings in this job using my base resume; write the result per fit.md.`,
     ingest: ingestFit,
+    // Un-queued → back to `review`, the Scan Watchlist triage list where it awaits your decision.
+    onUnqueue: ({ postingId }) =>
+      unqueueCandidate(postingId, { from: "fit_queue", to: "review", source: "discovery", label: "fit" }),
+    redoPhase: "fit",
   },
   tailoring: {
     type: "tailoring",
@@ -368,17 +392,36 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     buildTask: () =>
       `Tailor resumes for postings in the 'tailoring' stage (see the listApplications MCP tool). For each, read its JD, tailor the base resume, save to resume/<slug>/, and report the result via submitJobResult per tailoring.md.`,
     ingest: ingestTailoring,
+    // Only a FIRST-TIME tailor parks the posting in `tailoring` with no resume yet (the funnel shows
+    // "Queued for tailoring…"), so only that one gets un-queued — to `assessed`, its pre-tailor stage.
+    // A redo's posting is already `tailored` and keeps its resume; the guard leaves it alone.
+    onUnqueue: ({ postingId }) =>
+      unqueueCandidate(postingId, { from: "tailoring", to: "assessed", source: "tailoring", label: "tailoring", guard: (c) => !c.resumeDir }),
+    redoPhase: "tailor",
   },
   "inbox-sync": {
     type: "inbox-sync",
     title: "Sync Inbox",
     description: "Read job email → update application statuses, interviews, and dates.",
     playbook: "inbox-sync.md",
+    // `since` is a UNIX epoch in seconds — name it as the literal `after:` operand so the agent
+    // pastes it straight into searchGmail instead of trying to render it as a readable date.
     buildTask: (p) =>
-      `Audit my Gmail for job-application emails since ${p?.since ?? "the last sync"} and write the result per inbox-sync.md.`,
+      `Audit my Gmail for job-application emails matching \`after:${p?.since ?? "<the last sync>"}\` and write the result per inbox-sync.md.`,
     // `approval`: an inbox sync never edits the tracker directly — every change it derives from your
     // mail is parked for you to approve on the Changes page.
-    ingest: (records, dryRun) => reconcile(incomingFromInboxRecords(records), { actor: "CoWork", source: "inbox-sync", dryRun, approval: true }),
+    ingest: (records, dryRun) => {
+      // The mapper reports what it had to substitute; reconcile reports what it had to drop. Both
+      // land on the job summary, so an agent result we only half-understood never reads as a clean
+      // run. (`describeWarnings` returns "" when there's nothing to say.)
+      const { records: incoming, warnings } = incomingFromInboxRecords(records);
+      const result = reconcile(incoming, { actor: "CoWork", source: "inbox-sync", dryRun, approval: true });
+      const note = describeWarnings(warnings);
+      return note ? { ...result, summary: `${result.summary} · ${note}` } : result;
+    },
+    // Advance the sync watermark now the result is in the DB — this is the only writer of
+    // `inbox_last_synced`, which inboxSyncSince() reads to build the next run's search window.
+    afterIngest: ({ ingestedAt }) => setConfig(INBOX_SYNCED_KEY, ingestedAt),
   },
   prep: {
     type: "prep",

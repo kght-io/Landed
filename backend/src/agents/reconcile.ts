@@ -147,10 +147,18 @@ function insertIncoming(
 
 // Find the best existing company by canonical key; create one (preserving default tier)
 // if none exists. Normalizes the stored name to the canonical form.
-function resolveCompany(key: string, name: string, actor: string, source: string): { co: CompanyRow; isNew: boolean } {
+//
+// ...except under `approval`, where renaming would breach the very boundary the caller asked for:
+// an inbox sync infers company names out of email prose, so one hallucinated spelling would
+// silently rename a company you actually track, with no card to reject. Matching is by canonical
+// KEY, so declining the rename costs nothing — the record still lands on the right company, and the
+// proposal shows the tracker's spelling. (A company that doesn't exist yet is still created: the
+// parked proposal has to hang off a companyId. See createPendingChange.)
+function resolveCompany(key: string, name: string, actor: string, source: string, approval?: boolean): { co: CompanyRow; isNew: boolean } {
   const all = db.select().from(companies).all();
   const existing = all.find((c) => canonical(c.name)?.key === key);
   if (existing) {
+    if (approval) return { co: existing, isNew: false };
     if (existing.name !== name) db.update(companies).set({ name, updatedAt: new Date().toISOString() }).where(eq(companies.id, existing.id)).run();
     return { co: { ...existing, name }, isNew: false };
   }
@@ -184,14 +192,16 @@ export function reconcile(
   opts: { actor: string; source: string; dryRun?: boolean; approval?: boolean }
 ): ReconcileResult {
   const { actor, source, dryRun, approval } = opts;
-  let inserted = 0, updated = 0, fieldChanges = 0, flagged = 0, pending = 0, newCompanies = 0;
+  let inserted = 0, updated = 0, fieldChanges = 0, flagged = 0, pending = 0, newCompanies = 0, skipped = 0;
   const details: { action: string; summary: string }[] = [];
 
   // group incoming by canonical company
   const groups = new Map<string, { name: string; recs: IncomingApp[] }>();
   for (const rec of records) {
     const c = canonical(rec.company);
-    if (!c) continue;
+    // No canonical company → there's nothing to match or create against, so the record can't be
+    // used. Count it: dropping it silently is what makes a broken run look like an empty one.
+    if (!c) { skipped++; continue; }
     if (!groups.has(c.key)) groups.set(c.key, { name: c.name, recs: [] });
     groups.get(c.key)!.recs.push(rec);
   }
@@ -199,7 +209,7 @@ export function reconcile(
   try {
     db.transaction(() => {
     for (const [key, g] of groups) {
-      const { co, isNew } = resolveCompany(key, g.name, actor, source);
+      const { co, isNew } = resolveCompany(key, g.name, actor, source, approval);
       if (isNew) newCompanies++;
       // Mutable pool: the company's tracker postings + active pre-apply candidates (MATCH_STAGES),
       // growing with rows inserted this run so later identical records merge instead of duplicating.
@@ -289,12 +299,16 @@ export function reconcile(
 
   // In approval mode nothing was written, so a "0 new · 0 updated" line would read as "the sync found
   // nothing" when it actually found plenty and is waiting on you. Say what's true instead.
-  const summary = approval
+  // Skipped records are appended to BOTH forms: "nothing new" plus a skip count is the sentence that
+  // distinguishes a run that lost records from one that had nothing to say.
+  const skippedClause = skipped ? ` · ${skipped} record${skipped === 1 ? "" : "s"} skipped (no company)` : "";
+  const summary = (approval
     ? (pending === 0
         ? `nothing new — no changes to approve${newCompanies ? ` · ${newCompanies} new companies` : ""}`
         : `${pending} to approve on the Changes page${newCompanies ? ` · ${newCompanies} new companies` : ""}`)
-    : `${inserted} new · ${updated} updated (${fieldChanges} fields) · ${flagged} flagged · ${pending} to match · ${newCompanies} new companies`;
-  return { inserted, updated, fieldChanges, flagged, pending, newCompanies, summary, details };
+    : `${inserted} new · ${updated} updated (${fieldChanges} fields) · ${flagged} flagged · ${pending} to match · ${newCompanies} new companies`)
+    + skippedClause;
+  return { inserted, updated, fieldChanges, flagged, pending, newCompanies, skipped, summary, details };
 }
 
 // Resolve a parked item once the user decides. "apply" merges the incoming record onto the chosen

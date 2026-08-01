@@ -1,4 +1,5 @@
 import type { ReconcileResult } from "../agents/types";
+import type { RedoPhase } from "../types";
 
 export type JobType =
   | "watchlist-add"
@@ -57,4 +58,26 @@ export type JobDef = {
   // dryRun: compute the changes without persisting (powers the preview)
   ingest: (records: ResultRecord[], dryRun?: boolean) => ReconcileResult;
   hidden?: boolean; // keep the def (ingest/queue machinery) but omit from the agent Jobs list
+
+  // ── Per-type side effects the generic queue can't know about ──
+  // Post-ingest bookkeeping that writes OUTSIDE this ingest's own domain and needs the job row's
+  // context — its params, or the moment the result landed — neither of which `ingest` receives.
+  // Fires exactly once per job: never on a dry run, never for an already-ingested job, and never
+  // for one nobody holds a live claim on (submitJobResult returns/throws before reaching it).
+  afterIngest?: (ctx: {
+    jobId: string;
+    params: Record<string, unknown>;
+    ingestedAt: string;
+    records: ResultRecord[];
+    result: ReconcileResult;
+  }) => void;
+  // Undo what QUEUEING this type did outside the `jobs` table. Queuing a fit/tailoring job also
+  // parks its posting in a waiting stage, and the self-heal reconcilers re-create a job for any
+  // posting left parked there — so without this, deleting the job quietly undoes itself on the
+  // next /api/jobs poll.
+  onUnqueue?: (ctx: { jobId: string; params: Record<string, unknown>; postingId: number | null }) => void;
+  // This type produces a versioned artifact you can ask the agent to redo. Deleting its queued job
+  // drops the trailing pending user turn from the posting's conversation, so the "Queued for redo"
+  // tag clears instead of dangling.
+  redoPhase?: RedoPhase;
 };

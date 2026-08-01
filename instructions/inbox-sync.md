@@ -13,11 +13,24 @@ Audit my Gmail for job-application emails and report current status per applicat
 
 ## Steps
 1. Search my inbox for job-application email. **Choose the retrieval strategy by window
-   size** — the window is `now − params.since` (the app's last-synced time, a date like
-   `2026-06-18`, or `120d` on first run). Use `params.since` as your `searchGmail` `after:` filter
-   so you never re-scan old mail. (If you self-initiated this job and `params.since` is
-   missing, read `inboxLastSynced` from the `getContext` MCP tool.) The app advances this
-   watermark automatically after it ingests your result — don't set it yourself.
+   size** — the window is `now − params.since`.
+
+   `params.since` is set by the app on every queued sync and is a **UNIX epoch in seconds**
+   (`1784953419`) — **use it verbatim as your `searchGmail` `after:` filter**, i.e.
+   `after:1784953419`. Don't reformat it into a `YYYY/MM/DD` date: Gmail reads a calendar date in
+   the account's local timezone but reads an epoch as an absolute instant, and only the epoch
+   matches the watermark exactly. Don't swap in `newer_than:Nd` either — Gmail measures "ago" from
+   when the query runs, which may be hours after this job was queued.
+
+   It is the last-synced watermark **backed off by an hour on purpose**, or 120 days back on the
+   first run. Don't "tighten" that overlap to the watermark itself: the watermark is stamped when
+   the app ingested the last result, not at the newest message that was read, so the last stretch
+   of mail hasn't definitely been looked at. Re-seeing an hour of mail is free (a change you
+   re-report either dedups onto the existing card or, if it's already approved, produces nothing).
+
+   Only if `params.since` is absent entirely (a run you self-initiated): read `inboxLastSynced`
+   from the `getContext` MCP tool — it's an ISO timestamp — and search from an hour before it. The
+   app advances the watermark automatically after it ingests your result — never set it yourself.
 
    **Why strategy depends on window size:** snippets come back *free* in `searchGmail`
    results (no extra `getGmailThread` call needed to classify), so the real cost is the token
@@ -149,6 +162,10 @@ Two consequences for how you report:
 - **Re-syncing is safe and expected.** A proposal that's still pending is *refreshed* by a later sync
   (learning about a third round updates the existing card rather than stacking a second one), and a
   change that's already been approved produces nothing on the next run.
+
+A company already on the tracker keeps **its** stored spelling — your `company` value matches it (the
+match is on the canonical key, so casing and suffixes don't matter) but never renames it. Still send
+the canonical brand form: it's what a company the tracker hasn't seen yet gets created as.
 
 Interview mail is matched against the postings already **in the interview stage** for that company —
 if the human is interviewing at Acme, a scheduling email lands there rather than being offered

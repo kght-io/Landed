@@ -135,8 +135,11 @@ button — **never self-initiate watchlist scans, and never call `scanWatchlist`
 ## If the queue is empty (scheduled run)
 You don't have to wait for the app to queue work. On your daily run, just **do** today's jobs
 and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a ledger entry):
-- **inbox-sync** — set `params.since` to `inboxLastSynced` from the `getContext` MCP tool
-  (or `120d` if null), follow `inbox-sync.md`.
+- **inbox-sync** — read `inboxLastSynced` (an ISO timestamp) from the `getContext` MCP tool and
+  search from **an hour before it**, as a UNIX epoch in seconds: `after:<epoch>`. If it's null,
+  go back 120 days. Don't use a `YYYY/MM/DD` date (Gmail reads that in the account's local
+  timezone, the watermark is UTC) or `newer_than:` (it measures from when the query runs).
+  Follow `inbox-sync.md`.
 
 **Do NOT self-initiate `watchlist-scan`.** Watchlist scans are queued by the app (you click
 "Scrape watchlist", which queues one job per stale company) — only ever work the queued jobs.

@@ -1,23 +1,13 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { getPosting } from "@landed/backend/db/queries";
-import { canonical } from "@landed/shared/agents/canonical";
 import { getCompanyProfile } from "@landed/backend/db/prep";
 import { PREP_ROOT, prepContextDumpedAt } from "@landed/backend/prep/export-context";
 import { listTranscripts } from "@landed/backend/prep/transcripts";
-import { listAttachments } from "@landed/backend/prep/attachments";
+import { listAttachmentFiles } from "@landed/backend/prep/attachments";
+import { postingPrepSlug } from "@landed/backend/prep/slug";
 
 export const dynamic = "force-dynamic";
-
-// Resolve a posting id → its company's interview-prep folder slug (the same key the exporter, brief,
-// and pull jobs use). Null when the id is bad or the posting is gone.
-function slugFor(id: string): string | null {
-  const appId = Number(id);
-  if (!Number.isInteger(appId)) return null;
-  const p = getPosting(appId);
-  return p ? (canonical(p.company)?.key ?? null) : null;
-}
 
 const mtime = (file: string): string | null => {
   try { return fs.statSync(file).mtime.toISOString(); } catch { return null; }
@@ -28,12 +18,12 @@ const mtime = (file: string): string | null => {
 // and counts. Everything read-only off disk + the prep profile.
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const slug = slugFor(id);
+  const slug = postingPrepSlug(id);
   if (!slug) return Response.json({ error: "not found" }, { status: 404 });
   const profile = getCompanyProfile(slug);
   return Response.json({
     slug,
-    emails: { at: mtime(path.join(PREP_ROOT, slug, "emails.md")), files: listAttachments(slug).length },
+    emails: { at: mtime(path.join(PREP_ROOT, slug, "emails.md")), attachments: listAttachmentFiles(slug) },
     questions: { researchedAt: profile?.researchedAt ?? null },
     transcripts: listTranscripts(slug),
     context: { at: prepContextDumpedAt(slug) },
@@ -45,7 +35,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 // machine). Best-effort, mirrors app/api/resume/open.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const slug = slugFor(id);
+  const slug = postingPrepSlug(id);
   if (!slug) return Response.json({ error: "not found" }, { status: 404 });
   const body = (await request.json().catch(() => ({}))) as { action?: unknown };
   if (body.action !== "open") return Response.json({ error: "unknown action" }, { status: 400 });

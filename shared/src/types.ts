@@ -122,6 +122,9 @@ export type Interviewer = { name: string; title?: string };
 export type InterviewRound = {
   id?: number;
   round?: number; // 1-based order within the loop (sort key)
+  // The recruiter's own name for the block this round sits in ("Technical Assessment"). Consecutive
+  // rounds that share one become a single stage in the drawer; absent, same-day rounds group instead.
+  stage?: string;
   kind?: InterviewKind;
   date?: string; // ISO date (scheduled or completed)
   outcome?: "passed" | "rejected" | "pending"; // pending = scheduled/upcoming
@@ -139,6 +142,7 @@ export type InterviewRound = {
   joinUrl?: string;
   whatToExpect?: string; // what they said the round IS — the prose worth reading before it
   prepNotes?: string[]; // their how-to-prepare list, one item per line
+  attachments?: string[]; // files this round's thread carried, as saved under interview-prep/<slug>/attachments/
 };
 
 // Gmail thread ids for the email that drove each tracker stage (captured by inbox-sync), so the

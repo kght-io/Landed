@@ -62,3 +62,24 @@ export function listAttachments(slug: string): string[] {
     return [];
   }
 }
+
+// The same files with their sizes, name-sorted — what the drawer lists as openable links (a round
+// says which of these belong to it; the rest stay under "Interview emails").
+export function listAttachmentFiles(slug: string): SavedAttachment[] {
+  const dir = attachmentsDir(slug);
+  return listAttachments(slug)
+    .map((name) => ({ name, bytes: fs.statSync(path.join(dir, name)).size }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Resolve one attachment for serving. Null unless the name is exactly what safeName would have
+// written — the name reaches us from a URL, and the round that named it came from an email.
+export function resolveAttachment(slug: string, name: string): string | null {
+  if (!name || safeName(name) !== name) return null;
+  const dir = path.resolve(attachmentsDir(slug));
+  const full = path.resolve(dir, name);
+  // Belt and braces: safeName already strips every separator, so this can't fire today. It's here
+  // so a future loosening of safeName can't quietly turn this into a file-read primitive.
+  if (!full.startsWith(dir + path.sep)) return null;
+  return fs.existsSync(full) ? full : null;
+}

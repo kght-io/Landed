@@ -98,6 +98,37 @@ test("re-running the capture changes nothing", () => {
   assert.match(out.summary, /0|no/i);
 });
 
+test("it reports the stage a round belongs to and the files that thread carried", () => {
+  const id = seedApp({ company: "Fora", role: "Senior Software Engineer", status: "interview" });
+
+  submitJobResult({
+    type: "interview-emails",
+    jobId: "ie-8",
+    records: [{ id, rounds: [
+      { round: 3, stage: "Technical Assessment", kind: "behavioral", date: "2026-08-04", startTime: "1:00pm", durationMins: 30 },
+      { round: 4, stage: "Technical Assessment", kind: "system_design", date: "2026-08-04", startTime: "1:45pm", durationMins: 60, attachments: ["fora-prep-guide.pdf"] },
+    ] }],
+  });
+
+  const rounds = listInterviews(id);
+  assert.deepEqual(rounds.map((r) => r.stage), ["Technical Assessment", "Technical Assessment"]);
+  assert.deepEqual(rounds[1].attachments, ["fora-prep-guide.pdf"]);
+  assert.equal(rounds[0].attachments, undefined, "a round with no files carries none");
+});
+
+test("a writer that stays silent on stage/attachments keeps what's stored", () => {
+  const id = seedApp({ company: "Fora", role: "Senior Software Engineer", status: "interview" });
+  upsertInterviews(id, [{ round: 4, stage: "Technical Assessment", attachments: ["fora-prep-guide.pdf"] }]);
+
+  // inbox-sync's thin pass: kind/date/outcome only.
+  upsertInterviews(id, [{ round: 4, kind: "system_design", date: "2026-08-04", outcome: "pending" }]);
+
+  const [r] = listInterviews(id);
+  assert.equal(r.stage, "Technical Assessment");
+  assert.deepEqual(r.attachments, ["fora-prep-guide.pdf"]);
+  assert.equal(r.kind, "system_design");
+});
+
 test("a result with no rounds is still a valid asset-only run (no crash, no rounds)", () => {
   const id = seedApp({ company: "Pendo", role: "Staff Software Engineer", status: "interview" });
   submitJobResult({ type: "interview-emails", jobId: "ie-6", records: [{ id }] });

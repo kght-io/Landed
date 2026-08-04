@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, XCircle, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Coins, Target, ArrowRightCircle, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle, ChevronRight } from "lucide-react";
+import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Target, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle } from "lucide-react";
 import type { BriefGap, InterviewBrief, InterviewRound, Posting, RedoTurn, SourcedText, Status, Tier } from "@landed/shared/types";
 import { reapplyInfo, STATUS_LABEL, STATUS_CHIP, TIER_META, TIERS } from "@landed/shared/pipeline/stages";
-import { nextRound, roundWhen, hasDetail } from "@landed/shared/pipeline/interview-loop";
+import { ROUND_KIND_LABEL } from "@landed/shared/prep/landing";
 import { type CompanyAgg } from "@landed/shared/pipeline/board";
+import InterviewStages from "./InterviewStages";
+import { AttachmentChip, revealPrepFolder } from "./PrepFiles";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import { tailorDiffFor } from "@landed/shared/jobs/redolog";
 import { FitBadge, GapList } from "./Badges";
@@ -87,170 +89,21 @@ function EmptyStage({ children }: { children: React.ReactNode }) {
   return <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-5 text-center text-[13px] text-zinc-600">{children}</p>;
 }
 
-const KIND_LABEL: Record<string, string> = {
-  recruiter_screen: "Recruiter screen", phone_screen: "Phone screen", technical: "Technical",
-  system_design: "System design", behavioral: "Behavioral", onsite: "Onsite",
-  hiring_manager: "Hiring manager", final: "Final", other: "Interview",
-};
-
-// Who you're meeting, as a line of "Name · Title" chips.
-function Interviewers({ people }: { people: NonNullable<InterviewRound["interviewers"]> }) {
+// One prep-material input row: a dumped-vs-missing dot + label + status line + an action, with an
+// optional full-width `below` slot (the emails row lists the files it downloaded there).
+function MaterialRow({ icon, label, done, status, children, below }: { icon: React.ReactNode; label: string; done: boolean; status: string; children?: React.ReactNode; below?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {people.map((who, i) => (
-        <span key={i} className="inline-flex items-center gap-1 rounded-md bg-zinc-800/70 px-1.5 py-0.5 text-[12px] text-zinc-300">
-          <Users size={11} className="text-zinc-500" />
-          {who.name}
-          {who.title && <span className="text-zinc-500">· {who.title}</span>}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-// Everything `interview-emails` captured about one round, below its headline. Each block renders
-// only if that piece was actually captured, so a thin round degrades to nothing rather than to a
-// column of "—". Before this the same content existed only as prose in emails.md, which no screen read.
-function RoundDetail({ r }: { r: InterviewRound }) {
-  const [showPrep, setShowPrep] = useState(false);
-  return (
-    <div className="mt-2 space-y-2">
-      {r.interviewers?.length ? <Interviewers people={r.interviewers} /> : null}
-      {r.format && <p className="text-[12px] text-zinc-500">{r.format}</p>}
-      {r.whatToExpect && (
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">What to expect</p>
-          <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-zinc-300">{r.whatToExpect}</p>
+    <div className="py-2">
+      <div className="flex items-center gap-2.5">
+        <span className={`shrink-0 ${done ? "text-emerald-400" : "text-zinc-600"}`}>{done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
+        <span className="shrink-0 text-zinc-500">{icon}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-medium text-zinc-200">{label}</p>
+          <p className="text-[12px] text-zinc-500">{status}</p>
         </div>
-      )}
-      {r.prepNotes?.length ? (
-        <div>
-          <button
-            onClick={() => setShowPrep((v) => !v)}
-            className="inline-flex items-center gap-1 text-[12px] font-medium text-zinc-400 transition hover:text-zinc-200"
-          >
-            <ChevronRight size={12} className={`transition ${showPrep ? "rotate-90" : ""}`} />
-            How to prepare ({r.prepNotes.length})
-          </button>
-          {showPrep && (
-            <ul className="mt-1 space-y-1 pl-4">
-              {r.prepNotes.map((n, i) => (
-                <li key={i} className="text-[13px] leading-relaxed text-zinc-400">
-                  <span className="mr-1.5 text-zinc-600">•</span>{n}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
-      {r.notes && <p className="text-[12px] leading-relaxed text-zinc-500">{r.notes}</p>}
-    </div>
-  );
-}
-
-// The pinned "Up next" card for an interviewing posting: which round is coming, exactly when, who's
-// on it, a join button, and what they said to expect. Falls back to the bare headline when the loop
-// hasn't been captured in detail yet.
-function UpNext({ p, rounds }: { p: Posting; rounds: InterviewRound[] }) {
-  const cur = nextRound(rounds);
-  const idx = cur ? rounds.findIndex((r) => r === cur) : -1;
-  const headline = rounds.length ? `Round ${(idx >= 0 ? idx : rounds.length - 1) + 1} of ${rounds.length}` : "Interviewing";
-  return (
-    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="text-[15px] font-semibold text-emerald-200">{headline}</span>
-        {p.status === "offer" && <Chip tone="emerald">offer</Chip>}
-        {cur?.joinUrl && (
-          <a
-            href={cur.joinUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2 py-1 text-[12px] font-medium text-emerald-950 transition hover:bg-emerald-400"
-          >
-            <ExternalLink size={11} /> Join
-          </a>
-        )}
+        {children}
       </div>
-      {cur ? (
-        <>
-          <p className="mt-1 text-[13px] text-zinc-300">
-            Up next: <span className="font-medium text-zinc-100">{KIND_LABEL[cur.kind ?? "other"]}</span>
-            <span className="text-zinc-500"> · {roundWhen(cur)}</span>
-          </p>
-          {hasDetail(cur) ? <RoundDetail r={cur} /> : (
-            <p className="mt-1.5 text-[12px] text-zinc-500">
-              No detail captured yet — Pull interview emails to fill in who, the format, and what to expect.
-            </p>
-          )}
-        </>
-      ) : (
-        <p className="mt-1 text-[13px] text-zinc-300">
-          {rounds.length ? "All scheduled rounds done — awaiting outcome." : "No rounds scheduled yet — Sync Inbox to pull them in."}
-        </p>
-      )}
-      {p.appliedDate && <p className="mt-1.5 text-[12px] text-zinc-500">Applied {p.appliedDate}</p>}
-    </div>
-  );
-}
-
-// The interview-stage timeline: one node per round (kind · when), an outcome dot, and a highlight on
-// the current/upcoming round. A round that carries captured detail expands to show it.
-function RoundsTimeline({ rounds }: { rounds: InterviewRound[] }) {
-  const [open, setOpen] = useState<number | null>(null);
-  if (!rounds.length) {
-    return (
-      <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-4 text-center text-[13px] text-zinc-600">
-        No rounds yet — Sync Inbox to pull interview stages from your email.
-      </p>
-    );
-  }
-  const cur = nextRound(rounds);
-  return (
-    <ol className="relative ml-1 space-y-3 border-l border-zinc-800 pl-4">
-      {rounds.map((r, i) => {
-        const outcome = r.outcome ?? "pending";
-        const current = r === cur;
-        const Icon = outcome === "passed" ? CheckCircle2 : outcome === "rejected" ? XCircle : Circle;
-        const tone = outcome === "passed" ? "text-emerald-400" : outcome === "rejected" ? "text-rose-300" : current ? "text-amber-300" : "text-zinc-600";
-        const expandable = hasDetail(r);
-        const expanded = open === i;
-        return (
-          <li key={r.id ?? i} className="relative">
-            <span className="absolute -left-[22px] top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-950">
-              <Icon size={14} className={tone} />
-            </span>
-            <div className={`rounded-lg px-2.5 py-1.5 ${current ? "bg-amber-500/10 ring-1 ring-inset ring-amber-500/25" : ""}`}>
-              <button
-                type="button"
-                disabled={!expandable}
-                onClick={() => setOpen(expanded ? null : i)}
-                className="flex w-full items-center gap-2 text-left disabled:cursor-default"
-              >
-                {expandable && <ChevronRight size={12} className={`shrink-0 text-zinc-500 transition ${expanded ? "rotate-90" : ""}`} />}
-                <span className="text-[13px] font-medium text-zinc-200">{KIND_LABEL[r.kind ?? "other"] ?? "Interview"}</span>
-                {current && <span className="rounded bg-amber-500/20 px-1.5 text-[11px] font-medium text-amber-300">{r.date ? "upcoming" : "current"}</span>}
-                <span className="ml-auto text-[12px] tabular-nums text-zinc-500">{roundWhen(r)}</span>
-              </button>
-              {expanded ? <RoundDetail r={r} /> : r.notes && !expandable ? <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500">{r.notes}</p> : null}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-// One prep-material input row: a dumped-vs-missing dot + label + status line + an action.
-function MaterialRow({ icon, label, done, status, children }: { icon: React.ReactNode; label: string; done: boolean; status: string; children?: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2.5 py-2">
-      <span className={`shrink-0 ${done ? "text-emerald-400" : "text-zinc-600"}`}>{done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
-      <span className="shrink-0 text-zinc-500">{icon}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-medium text-zinc-200">{label}</p>
-        <p className="text-[12px] text-zinc-500">{status}</p>
-      </div>
-      {children}
+      {below}
     </div>
   );
 }
@@ -271,7 +124,7 @@ function RowButton({ state, label, onClick }: { state: "idle" | "queuing" | "que
 
 type PrepAssets = {
   slug: string;
-  emails: { at: string | null; files: number };
+  emails: { at: string | null; attachments: { name: string; bytes: number }[] };
   questions: { researchedAt: string | null };
   transcripts: { name: string; bytes: number; at: string }[];
   context: { at: string | null };
@@ -310,11 +163,8 @@ function PrepMaterials({ p, onChanged }: { p: Posting; onChanged?: () => void })
       pendo.track("interview_prep_generated", { posting_id: p.id });
     } catch { setPrepState("idle"); }
   };
-  const openFolder = () => {
-    fetch(`/api/applications/${p.id}/prep-assets`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "open" }) }).catch(() => {});
-  };
-
   const emails = assets?.emails;
+  const files = emails?.attachments ?? [];
   const researchedAt = assets?.questions?.researchedAt ?? null;
   const transcripts = assets?.transcripts ?? [];
   const slug = assets?.slug ?? prepSlug;
@@ -323,7 +173,7 @@ function PrepMaterials({ p, onChanged }: { p: Posting; onChanged?: () => void })
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-1 flex items-center justify-between">
         <SectionLabel>Interview prep materials</SectionLabel>
-        <button onClick={openFolder} title="Reveal the interview-prep folder" className="inline-flex items-center gap-1 text-[12px] text-zinc-400 transition hover:text-zinc-200">
+        <button onClick={() => revealPrepFolder(p.id)} title="Reveal the interview-prep folder" className="inline-flex items-center gap-1 text-[12px] text-zinc-400 transition hover:text-zinc-200">
           <FolderOpen size={12} /> open folder
         </button>
       </div>
@@ -332,7 +182,14 @@ function PrepMaterials({ p, onChanged }: { p: Posting; onChanged?: () => void })
           icon={<Mail size={15} />}
           label="Interview emails"
           done={!!emails?.at}
-          status={emails?.at ? `pulled ${emails.at.slice(0, 10)}${emails.files ? ` · ${emails.files} file${emails.files === 1 ? "" : "s"}` : ""}` : "not pulled yet"}
+          status={emails?.at ? `pulled ${emails.at.slice(0, 10)}${files.length ? ` · ${files.length} file${files.length === 1 ? "" : "s"}` : ""}` : "not pulled yet"}
+          below={files.length ? (
+            // Every file the recruiter sent, openable. A stage links the ones its rounds claimed;
+            // this is the whole folder, so a file no round named is still one click away.
+            <div className="mt-1.5 flex flex-wrap gap-1.5 pl-[46px]">
+              {files.map((f) => <AttachmentChip key={f.name} postingId={p.id} name={f.name} bytes={f.bytes} />)}
+            </div>
+          ) : null}
         >
           <RowButton state={emailState} label={emails?.at ? "Re-pull" : "Pull"} onClick={pullEmails} />
         </MaterialRow>
@@ -484,8 +341,10 @@ function TranscriptDrop({ postingId, onSaved }: { postingId: string; onSaved?: (
 
 // The interview brief — a versioned overview the agent generates from this company's interview-prep
 // asset folder (context.md + dropped transcripts + fetched emails). Shows the latest version's
-// role · TC · next step · gaps-to-prep, a version switcher, and a Generate button that (re)queues
-// the interview-brief job. Live off the shared queue for the queued/working state.
+// role · team · what they're looking for · gaps-to-prep, a version switcher, and a Generate button
+// that (re)queues the interview-brief job. Live off the shared queue for the queued/working state.
+// The agent still reports `tc` and `nextStep`; neither is shown here — comp belongs to the posting
+// and peer-comp, and the stage rail above answers "what's next" from the loop itself.
 function InterviewBriefCard({ p, onChanged }: { p: Posting; onChanged?: () => void }) {
   const { jobs, bump } = useAgentQueue();
   const briefs = p.interviewBriefs ?? [];
@@ -519,7 +378,7 @@ function InterviewBriefCard({ p, onChanged }: { p: Posting; onChanged?: () => vo
         <Sparkles size={16} className="shrink-0 text-violet-300" />
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-medium text-zinc-200">Interview brief</p>
-          <p className="text-[12px] text-zinc-500">Role · TC · next step · gaps, from your dumped materials.</p>
+          <p className="text-[12px] text-zinc-500">Role · team · what they want · gaps, from your dumped materials.</p>
         </div>
         <button
           onClick={generate}
@@ -551,11 +410,10 @@ function InterviewBriefCard({ p, onChanged }: { p: Posting; onChanged?: () => vo
       {current ? (
         <div className="mt-3 space-y-3 border-t border-violet-500/15 pt-3">
           <div className="space-y-2.5">
+            {/* Comp lives on the posting and in peer-comp; the next step is the stage rail above. */}
             <BriefFact icon={<Building2 size={13} />} label="Role" fact={current.role} />
-            <BriefFact icon={<Coins size={13} />} label="Total comp" fact={current.tc} />
             <BriefFact icon={<Users size={13} />} label="Team" fact={current.team} />
             <BriefFact icon={<Eye size={13} />} label="What they're looking for" fact={current.expectations} />
-            <BriefFact icon={<ArrowRightCircle size={13} />} label="Next step" fact={current.nextStep} />
           </div>
           {current.summary && <p className="text-[13px] leading-relaxed text-zinc-300">{current.summary}</p>}
           {!!current.gaps?.length && (
@@ -787,7 +645,7 @@ function StageHighlight({ p, col, rounds, reapply, isCurrent = true }: { p: Post
       </div>
     );
   }
-  if (col === "interviewing") return <UpNext p={p} rounds={rounds} />;
+  if (col === "interviewing") return <InterviewStages p={p} rounds={rounds} />;
   if (col === "closed") {
     const ended = daysLabel(relDays(p.updatedAt ?? p.appliedDate));
     const furthest = [...rounds].reverse().find((r) => r.outcome && r.outcome !== "pending");
@@ -800,7 +658,7 @@ function StageHighlight({ p, col, rounds, reapply, isCurrent = true }: { p: Post
           {reapply.state === "eligible" && <span className="ml-auto"><Chip tone="emerald">✓ reapply eligible</Chip></span>}
           {reapply.state === "cooldown" && <span className="ml-auto"><Chip tone="amber">reapply after {reapply.until}</Chip></span>}
         </div>
-        {furthest && <p className="mt-1.5 text-[13px] text-zinc-400">Furthest reached: <span className="text-zinc-200">{KIND_LABEL[furthest.kind ?? "other"]}</span></p>}
+        {furthest && <p className="mt-1.5 text-[13px] text-zinc-400">Furthest reached: <span className="text-zinc-200">{ROUND_KIND_LABEL[furthest.kind ?? "other"]}</span></p>}
       </div>
     );
   }
@@ -1008,7 +866,7 @@ export default function CompanyDrawer({
                 </label>
                 <InterviewedToggle p={p} onSetInterviewed={onSetInterviewed} />
               </div>
-              {rounds.length > 0 && <div><SectionLabel>Interview history</SectionLabel><RoundsTimeline rounds={rounds} /></div>}
+              {rounds.length > 0 && <div><SectionLabel>Interview history</SectionLabel><InterviewStages p={p} rounds={rounds} /></div>}
               {p.comp && <div><SectionLabel>Comp structure</SectionLabel><p className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-400">{p.comp}</p></div>}
               {p.teamNotes && <div><SectionLabel>Team · product · work</SectionLabel><p className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-400">{p.teamNotes}</p></div>}
             </>

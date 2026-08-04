@@ -65,6 +65,7 @@ export const interviews = sqliteTable("interviews", {
     .notNull()
     .references(() => postings.id),
   round: integer("round"),
+  stage: text("stage"), // the recruiter's name for the block this round belongs to ("Technical Assessment")
   kind: text("kind"), // phone_screen | onsite | system_design | ...
   date: text("date"),
   outcome: text("outcome"), // passed | rejected | pending
@@ -81,6 +82,7 @@ export const interviews = sqliteTable("interviews", {
   joinUrl: text("join_url"),
   whatToExpect: text("what_to_expect"),
   prepNotes: text("prep_notes"), // JSON string[] — their how-to-prepare list
+  attachments: text("attachments"), // JSON string[] — filenames under interview-prep/<slug>/attachments/
 });
 
 // Small key-value store for app state (Gmail refresh token, last-sync cursor, …).

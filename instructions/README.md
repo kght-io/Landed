@@ -182,11 +182,13 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   record; each run appends a new version.
 - `interview-emails.md` — **capture** a company's interviewing emails (recruiter outreach, scheduling,
   what-to-expect, comp) + file attachments into `interview-prep/<slug>/` (`emails.md` + `attachments/`),
-  **and report the structured interview loop** back to the app: per round — who you're meeting, the
-  exact time/duration/zone, the format, the join link, what they said to expect, and their how-to-prepare
-  list. That lands on the posting's rounds and drives the drawer's **Up next** card, so it's readable in
-  the app rather than only in a file. Queued by the **Pull interview emails** button; searches ~3 months
-  by company, writes the files, and downloads attachments via `downloadGmailAttachments`.
+  **and report the structured interview loop** back to the app: per round — the `stage` it belongs to,
+  who you're meeting, the exact time/duration/zone, the format, the join link, what they said to expect,
+  their how-to-prepare list, and the `attachments` that round's thread carried. That lands on the
+  posting's rounds and drives the drawer's **stage** view (rounds sharing a `stage` name render as one
+  block, with its files linked), so it's readable in the app rather than only in a file. Queued by the
+  **Pull interview emails** button; searches ~3 months by company, writes the files, and downloads
+  attachments via `downloadGmailAttachments`.
   It does NOT touch application **status** — global inbox-sync owns that.
   - The pipeline's Interviewing view also has a global **Update interview status** button that fans
     this out in one click: a global inbox-sync, then for EVERY interview/offer company it refreshes

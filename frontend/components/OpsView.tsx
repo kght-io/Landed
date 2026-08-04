@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Activity, AlertTriangle, Bot, HardDrive, Inbox, ListChecks, RefreshCw } from "lucide-react";
 import { ago, fmtTs } from "@landed/shared/format/time";
+import { fmtBytes } from "@landed/shared/format/bytes";
 import type { OpsTone } from "@landed/shared/format/ops";
 import type { OpsSnapshot, OpsFile } from "@landed/backend/db/ops";
 import type { AgentRunFile } from "@landed/backend/agents/run-log";
@@ -22,13 +23,6 @@ const HEADLINE: Record<OpsTone, string> = {
   neutral: "Nothing to report",
 };
 
-const fmtBytes = (n: number) => {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB"];
-  let v = n / 1024, i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
-};
 
 // Duration, not a timestamp — "how long has this been waiting".
 const fmtDuration = (ms: number | null) => {

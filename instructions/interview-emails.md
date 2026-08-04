@@ -28,22 +28,25 @@ application status, which global inbox-sync owns.
 3. **Download attachments.** For every thread that carries a file (role PDF, prep guide, take-home
    spec), call **`downloadGmailAttachments(id: <threadId>, slug: "<slug>")`** — the app saves the
    files into `interview-prep/<slug>/attachments/` and returns their names. Reference them in
-   `emails.md`.
+   `emails.md`, and report the returned names on the round that thread is about (`attachments`
+   below) so the drawer can link the file from the stage it belongs to.
 4. **Report the loop.** Submit ONE record for the posting — the same rounds you just wrote up, in
    structured form, so the app can show them on the posting instead of leaving them buried in a file:
 
    ```json
    submitJobResult({ type: "interview-emails", jobId: "<this job>", records: [
      { "id": 903161, "rounds": [
-       { "round": 1, "kind": "recruiter_screen", "date": "2026-07-08", "outcome": "passed",
+       { "round": 1, "stage": "Recruiter Screen",
+         "kind": "recruiter_screen", "date": "2026-07-08", "outcome": "passed",
          "interviewers": [{ "name": "Steve Cosme", "title": "Sr. Recruiter II" }] },
-       { "round": 3, "kind": "technical", "date": "2026-07-29",
+       { "round": 3, "stage": "Technical Assessment", "kind": "technical", "date": "2026-07-29",
          "startTime": "1:00pm", "durationMins": 60, "timezone": "ET",
          "format": "Zoom video, shared screen",
          "joinUrl": "https://acme.zoom.us/j/9215827",
          "interviewers": [{ "name": "Zain Lakhani", "title": "Chief AI Officer" }],
          "whatToExpect": "Shared-screen chatbot exercise — they want applied-AI judgment, real-time tradeoffs, and adapting when challenged mid-session.",
-         "prepNotes": ["Bring a scaffolded local project", "Pre-configure API keys", "Be ready to defend architecture + guardrails"] }
+         "prepNotes": ["Bring a scaffolded local project", "Pre-configure API keys", "Be ready to defend architecture + guardrails"],
+         "attachments": ["acme-take-home.pdf"] }
      ] }
    ] })
    ```
@@ -52,9 +55,17 @@ application status, which global inbox-sync owns.
      missing id parks the result as an unbound alert instead of landing.
    - **`round`** numbers the loop chronologically (1 = first). Keep them stable across re-runs — the
      app merges on `round`, so a stable number updates a round in place instead of duplicating it.
+   - **`stage`** is the recruiter's own name for the block a round sits in — "Technical Assessment",
+     "Technical Leadership", "Onsite (Final Round)". Consecutive rounds sharing one become a single
+     stage in the drawer, which is how a three-interview day reads as one thing instead of three.
+     Copy the name from the email verbatim and keep it byte-stable across re-runs. Report it for
+     **every** round of a loop you understand, including ones not yet scheduled — without it the app
+     falls back to grouping by date, and two undated future stages collapse into one.
    - **`whatToExpect`** is the one that matters most: what they actually said the round IS. Write it
      as prose you'd want to read the night before, not a label.
    - **`prepNotes`** is their how-to-prepare list, one item per entry.
+   - **`attachments`** is the filenames `downloadGmailAttachments` returned for that round's thread
+     (exactly as returned — the app links them out of `attachments/` by name).
    - **`startTime`** accepts `"1:00pm"` or `"13:00"`; give `timezone` exactly as the email stated it
      (`"ET"`). Omit rather than guess — a wrong time on the Up-next card is worse than no time.
    - **Omit any field you don't know.** Omitted fields keep whatever is already stored; they are not

@@ -33,6 +33,7 @@ function toRound(r: InterviewRow): InterviewRound {
   return {
     id: r.id,
     round: r.round ?? undefined,
+    stage: r.stage ?? undefined,
     kind: (r.kind as InterviewKind | null) ?? undefined,
     date: r.date ?? undefined,
     outcome: (r.outcome as InterviewRound["outcome"] | null) ?? undefined,
@@ -46,6 +47,7 @@ function toRound(r: InterviewRow): InterviewRound {
     joinUrl: r.joinUrl ?? undefined,
     whatToExpect: r.whatToExpect ?? undefined,
     prepNotes: jsonArray<string>(r.prepNotes),
+    attachments: jsonArray<string>(r.attachments),
   };
 }
 const roundSort = (a: InterviewRound, b: InterviewRound) =>
@@ -126,6 +128,7 @@ export function upsertInterviews(appId: number, rounds: InterviewRound[], opts: 
     const list = (v: unknown[] | undefined, p: string | null) => (v?.length ? JSON.stringify(v) : p ?? null);
     const vals = {
       round: roundNo,
+      stage: inc.stage ?? prior?.stage ?? null,
       kind: inc.kind ?? prior?.kind ?? null,
       date: inc.date ?? prior?.date ?? null,
       outcome: inc.outcome ?? prior?.outcome ?? null,
@@ -139,6 +142,7 @@ export function upsertInterviews(appId: number, rounds: InterviewRound[], opts: 
       joinUrl: inc.joinUrl ?? prior?.joinUrl ?? null,
       whatToExpect: inc.whatToExpect ?? prior?.whatToExpect ?? null,
       prepNotes: list(inc.prepNotes, prior?.prepNotes ?? null),
+      attachments: list(inc.attachments, prior?.attachments ?? null),
     };
     if (prior) {
       // Update only when something actually differs (keeps re-sync a true no-op).

@@ -359,6 +359,8 @@ function connection() {
       ["join_url", "join_url TEXT"],
       ["what_to_expect", "what_to_expect TEXT"],
       ["prep_notes", "prep_notes TEXT"],
+      ["stage", "stage TEXT"],
+      ["attachments", "attachments TEXT"],
     ] as const) {
       if (ivCols.size && !ivCols.has(name)) addColumn(sqlite, `ALTER TABLE interviews ADD COLUMN ${ddl}`);
     }

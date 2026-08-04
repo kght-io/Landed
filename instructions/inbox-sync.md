@@ -90,6 +90,10 @@ Audit my Gmail for job-application emails and report current status per applicat
      - **The recruiter screen / recruiter call counts as a round in its own right** — it's
        `round: 1` (`kind: "recruiter_screen"`), not a pre-screen to fold into "applied". If
        the recruiter call is the only stage so far, that's still one round (round 1 of 1).
+     - **A stage can hold several rounds.** When one invite books multiple back-to-back
+       interviews ("Technical Assessment: API design, system design, and a social call"),
+       report each as its own round and give them all the same `stage` name — that's what
+       makes the app show them as one block instead of three unrelated steps.
 
 ## Company name (canonical)
 The `Company` value must be the company's **canonical brand name** — not whatever the
@@ -140,7 +144,10 @@ the job's id (omit for a self-initiated run), and `records` = one object per app
   order), `kind` (one of `recruiter_screen` · `phone_screen` · `technical` · `system_design` ·
   `behavioral` · `onsite` · `hiring_manager` · `final` · `other`), `date` (`YYYY-MM-DD`),
   `outcome` (`passed` · `rejected` · `pending`), optional `notes`, optional **`emailId`** (the
-  Gmail thread id for that round's email — enables a direct link, falls back to search if omitted).
+  Gmail thread id for that round's email — enables a direct link, falls back to search if omitted),
+  optional **`stage`** (the recruiter's own name for the block this round belongs to, e.g.
+  `"Technical Assessment"` — consecutive rounds sharing one render as a single stage in the app;
+  report it only when the email states it, verbatim, and keep it stable across syncs).
   Re-sync is idempotent — the app merges rounds by `round` number, so resubmitting updates an
   outcome in place rather than duplicating. Keep `round` numbers stable across syncs.
 - One record per application attempt (don't merge re-applies).

@@ -94,6 +94,7 @@ export function incomingRounds(raw: unknown, log?: WarningLog, subject?: string)
       const mins = Number(o.durationMins ?? o.duration ?? o.lengthMins);
       return {
         round: Number.isFinite(n) && n > 0 ? n : i + 1,
+        stage: str(o.stage) ?? str(o.stageName) ?? str(o.group),
         kind: toKind(o.kind ?? o.type, log, subject),
         date: str(o.date) ?? str(o.scheduledFor),
         outcome: toOutcome(o.outcome ?? o.status),
@@ -107,10 +108,11 @@ export function incomingRounds(raw: unknown, log?: WarningLog, subject?: string)
         joinUrl: str(o.joinUrl) ?? str(o.zoomUrl) ?? str(o.meetingUrl),
         whatToExpect: str(o.whatToExpect) ?? str(o.expect) ?? str(o.description),
         prepNotes: toStrList(o.prepNotes ?? o.howToPrepare ?? o.prep),
+        attachments: toStrList(o.attachments ?? o.files),
       };
     })
     // Drop fully-empty entries — but a round is real if it carries ANY of the new detail too.
-    .filter((r) => r.kind || r.date || r.notes || r.emailId || r.whatToExpect || r.interviewers?.length || r.joinUrl || r.format || r.prepNotes?.length);
+    .filter((r) => r.stage || r.kind || r.date || r.notes || r.emailId || r.whatToExpect || r.interviewers?.length || r.joinUrl || r.format || r.prepNotes?.length || r.attachments?.length);
   return rounds.length ? rounds : undefined;
 }
 

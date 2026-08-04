@@ -2,20 +2,12 @@
 // actively interviewing vs. past (concluded) interviews, and what the next step in a live loop is.
 // Kept db-free so it's directly unit-testable (see tests/prep-landing.test.ts).
 
-import type { InterviewKind, InterviewRound, Status } from "../types";
+import type { InterviewRound, Status } from "../types";
 
-// Human labels for an interview round's kind — the "next step" line on an interviewing card.
-export const ROUND_KIND_LABEL: Record<InterviewKind, string> = {
-  recruiter_screen: "Recruiter screen",
-  phone_screen: "Phone screen",
-  technical: "Technical",
-  system_design: "System design",
-  behavioral: "Behavioral",
-  onsite: "Onsite",
-  hiring_manager: "Hiring manager",
-  final: "Final",
-  other: "Interview",
-};
+// The round-kind labels live with the loop model; re-exported here because this module's callers
+// (the prep landing's "next step" line) have always imported them from it.
+export { ROUND_KIND_LABEL } from "../pipeline/interview-loop";
+import { ROUND_KIND_LABEL } from "../pipeline/interview-loop";
 
 // Terminal (closed-column) statuses — the loop is over, an outcome was reached.
 const CLOSED_STATUSES: ReadonlySet<Status> = new Set<Status>([

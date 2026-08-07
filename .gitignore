@@ -45,6 +45,10 @@ frontend/next-env.d.ts
 # local sqlite db
 /data/
 
+# the default ASSET_ROOT (.env.example) — your résumés, transcripts, and interview
+# notes. Personal data; this repo is public.
+/asset-root/
+
 # Machine-specific local serving config (hardcoded absolute paths — not portable)
 /scripts/landed.Caddyfile
 /scripts/com.kaung.landed-proxy.plist

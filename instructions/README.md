@@ -221,6 +221,17 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
 > if you sent `high`). You review the **review** / **discarded** buckets on the Discovery page;
 > **high** flows straight to fit without you.
 >
+> **Company cooldown:** a company that rejected us after a *real* interview loop is skipped by
+> discovery for **six months**. `listWatchlist` / `listCompanies` show it as `cooldownUntil` (a
+> `YYYY-MM-DD` date, or null). While it's in force: the company is **not queued for a
+> watchlist-scan** at all, and anything that still arrives — a `submitGlance` verdict, a scan result
+> — is filed as `filtered` with `reason: "cooldown"` instead of reaching the funnel, whatever
+> verdict you sent. Don't work around it: if a cooling company shows up in a scan, that's the
+> intended outcome. The bar is a logged interview round that isn't a `recruiter_screen` — a
+> recruiter-screen rejection does **not** cool a company. It's set automatically, and you can set or
+> clear it by hand with `upsertCompanies`'s `cooldownUntil` (null ends it early) when a real
+> interview's rounds were never logged.
+>
 > **Discovery vs. the tracker — the Apply boundary:** everything before applying lives on the
 > **candidate** (discovery): glance buckets → **fit queue** → **assessed** → **tailoring** → **Apply
 > Later**. **Apply Later** (`apply_later` state) is your ready-to-submit staging list, sitting right
@@ -250,8 +261,8 @@ Read this live from the **`jobhunt` MCP tools** — no files to open, always cur
 > bundles** in `resume/<slug>/` stay on disk (binary artifacts).
 >
 > **Three separate concerns:**
-> - **Company records** (tier + scrape config) — curate with `upsertCompanies` (matched by
->   company name; only the fields you pass change). `tier` is just a tag.
+> - **Company records** (tier + scrape config, plus `cooldownUntil`) — curate with
+>   `upsertCompanies` (matched by company name; only the fields you pass change). `tier` is just a tag.
 > - **The watchlist** (what the scan checks) — manage with `addToWatchlist` / `removeFromWatchlist`.
 >   Scanning is expensive, so this is an explicit, curated list, independent of tier.
 > - **Leveling** (the IC SWE ladder the fit view draws against the reference) — its own lazy

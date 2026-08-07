@@ -32,6 +32,10 @@ export const companies = sqliteTable("companies", {
   // Discovery auto-scans ONLY watchlisted companies (scanning is expensive). Orthogonal to
   // tier — tier is for tagging/categorization; watchlist is "scan this for new postings".
   watchlist: integer("watchlist", { mode: "boolean" }).notNull().default(false),
+  // "Don't show me this company until <date>" (YYYY-MM-DD; null = not cooling). Set automatically
+  // when they reject you after a real interview loop, and editable/clearable by hand. Discovery
+  // skips a cooling company entirely — see shared/src/pipeline/cooldown.ts for the rule.
+  cooldownUntil: text("cooldown_until"),
   // Audit timestamps for the company record. createdAt = first seen; updatedAt = last *curation*
   // edit (tier / name / scrape-config / watchlist) — NOT bumped by auto-scrape, which has its own
   // lastScrapedAt. Both ISO; nullable so pre-existing rows backfill lazily.

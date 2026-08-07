@@ -10,6 +10,7 @@ import { companies, postings } from "../db/schema";
 import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 import { canonical, norm } from "@landed/shared/agents/canonical";
 import { getProfile } from "../db/profile";
+import { isCompanyCooling } from "../db/cooldown";
 import { NON_ENG } from "@landed/shared/jobs/exclude";
 
 export type ScannedJob = {
@@ -405,7 +406,8 @@ export async function scanCompany(name: string, withJd = true): Promise<ScanResu
 // `staleDays` limits the scan to companies last scraped more than N days ago (or never) — used by
 // the app's "Scrape watchlist" button so a refresh skips companies already scraped recently.
 export async function scanWatchlist(opts: { staleDays?: number } = {}): Promise<ScanResult[]> {
-  let wl = db.select().from(companies).where(eq(companies.watchlist, true)).all();
+  let wl = db.select().from(companies).where(eq(companies.watchlist, true)).all()
+    .filter((co) => !isCompanyCooling(co)); // cooling off after a rejection → not scanned at all
   if (opts.staleDays != null) {
     const cutoff = Date.now() - opts.staleDays * 86_400_000;
     wl = wl.filter((co) => !co.lastScrapedAt || new Date(co.lastScrapedAt).getTime() < cutoff);

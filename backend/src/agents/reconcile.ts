@@ -6,6 +6,7 @@ import { logEvent, createPendingMatch, createPendingChange, upsertInterviews } f
 import type { FieldDiff } from "@landed/shared/format/change";
 import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 import { emitStageChange } from "../db/stage-change";
+import { applyRejectionCooldown } from "../db/cooldown";
 import { canonical, defaultTier } from "@landed/shared/agents/canonical";
 import { matchPosting, interviewNarrowed, type MatchResult } from "@landed/shared/agents/match";
 import type { IncomingApp, ReconcileResult } from "@landed/shared/agents/types";
@@ -112,6 +113,8 @@ function applyIncoming(
   // Reaching the interview stage via sync earns prep research (one-shot per company) — announced,
   // not enqueued from here; the jobs layer subscribes. See ../db/stage-change.ts.
   if (changes.state === "interview") emitStageChange({ companyId: match.companyId, from: prevStage, to: "interview" });
+  // A synced rejection can earn the company a cooldown, exactly as the UI path does.
+  if (changes.state === "rejected") applyRejectionCooldown(match.companyId, match.id);
   // One event per field changed — the actor (the agent for inbox-sync) wrote these.
   const subject = `${opts.companyName} — ${match.title ?? rec.role ?? "?"}`;
   for (const d of fieldDiffs) {
@@ -143,6 +146,9 @@ function insertIncoming(
   const action = rec.needsReview ? "flag" : "insert";
   const summary = `${co.name} — ${rec.role ?? "?"} · ${rec.status}${rec.interviewed ? " · interviewed" : ""}${rec.needsReview ? " · NEEDS REVIEW" : ""}`;
   logEvent({ actor: opts.actor, source: opts.source, entityId: id, action, summary });
+  // An inbox sync can land a posting straight into `rejected` for a req you never tracked — the
+  // third way a rejection enters the app, and it earns a cooldown like the other two.
+  if (base.state === "rejected") applyRejectionCooldown(co.id, id);
   return { row: full, action, summary };
 }
 
@@ -168,7 +174,7 @@ function resolveCompany(key: string, name: string, actor: string, source: string
   const id = db.insert(companies).values({ name, tier, createdAt: ts, updatedAt: ts }).returning({ id: companies.id }).get().id;
   logEvent({ actor, source, entity: "company", entityId: id, action: "insert", summary: `new company ${name} [${tier}]` });
   return {
-    co: { id, name, tier, careersUrl: null, ats: null, fetchMethod: null, fetchRecipe: null, notes: null, slug: null, endpoint: null, targetTitles: null, targetLocation: null, leveling: null, lastScrapedAt: null, watchlist: false, createdAt: ts, updatedAt: ts },
+    co: { id, name, tier, careersUrl: null, ats: null, fetchMethod: null, fetchRecipe: null, notes: null, slug: null, endpoint: null, targetTitles: null, targetLocation: null, leveling: null, lastScrapedAt: null, watchlist: false, cooldownUntil: null, createdAt: ts, updatedAt: ts },
     isNew: true,
   };
 }

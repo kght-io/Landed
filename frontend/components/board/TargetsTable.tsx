@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { HelpCircle, Info, Loader2, Plus, Radar, RefreshCw, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { ago } from "@landed/shared/format/time";
 import { TIER_META, TIERS, type TargetCounts } from "@landed/shared/pipeline/stages";
+import { addMonths, COOLDOWN_MONTHS, isCooling } from "@landed/shared/pipeline/cooldown";
+import CoolingBadge from "@/components/board/CoolingBadge";
 import TrackerTag from "@/components/TrackerTag";
 import { useResizableColumns, ResTh } from "@/components/ResizableTable";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
@@ -10,8 +12,8 @@ import type { Tier } from "@landed/shared/types";
 
 // Scan config (fetch method + ATS, plus the recipe as a hover tooltip and a link out) lives in the
 // "Fetch" column — The agent-curated and read-only here.
-const WL_COLS = ["company", "tier", "titles", "fetch", "scraped", "pipeline", "actions"];
-const WL_DEFAULTS = { company: 170, tier: 100, titles: 200, fetch: 230, scraped: 110, pipeline: 130, actions: 104 };
+const WL_COLS = ["company", "tier", "titles", "fetch", "scraped", "cooldown", "pipeline", "actions"];
+const WL_DEFAULTS = { company: 170, tier: 100, titles: 200, fetch: 230, scraped: 110, cooldown: 132, pipeline: 130, actions: 104 };
 
 // How a company's board is read during a scan. The raw slugs (api / careers-get / browser) aren't
 // self-explanatory, so the Fetch column shows an explicit label + a tooltip describing each.
@@ -55,10 +57,41 @@ type Target = {
   titles: string[] | null;
   location: string | null;
   lastScrapedAt: string | null;
+  cooldownUntil: string | null; // YYYY-MM-DD — not scanned until then (see shared/src/pipeline/cooldown.ts)
 };
 
 type SortDir = "asc" | "desc";
 const WL_UNSORTABLE = new Set(["actions"]);
+
+// The Cooldown cell: a company that rejected you after a real interview loop is skipped by
+// discovery until this date. Set automatically on such a rejection, and settable by hand here —
+// which is the escape hatch for the rejections whose interview rounds were never logged.
+function CooldownCell({ until, onSet }: { until: string | null; onSet: (until: string | null) => void }) {
+  const cooling = isCooling(until);
+  if (cooling) {
+    return (
+      <div className="flex items-center gap-1">
+        <CoolingBadge until={until!} title={`Not scanned until ${until} — they rejected you after an interview`} />
+        <button
+          onClick={(e) => { e.stopPropagation(); onSet(null); }}
+          title="End the cooldown — start showing this company's jobs again"
+          className="rounded p-0.5 text-zinc-700 opacity-0 transition hover:bg-zinc-800 hover:text-zinc-300 group-hover:opacity-100"
+        >
+          <X size={11} />
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onSet(addMonths(new Date().toISOString().slice(0, 10), COOLDOWN_MONTHS)); }}
+      title={`Stop showing this company's jobs for ${COOLDOWN_MONTHS} months`}
+      className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 opacity-0 transition hover:bg-zinc-800 hover:text-zinc-300 group-hover:opacity-100"
+    >
+      Cool {COOLDOWN_MONTHS}mo
+    </button>
+  );
+}
 
 // Sort key for a watchlist row, per column. Tier orders by its rank in TIERS (tier1 → tier3);
 // pipeline by tracked count; the rest lexically. Nulls fall to the empty-string / 0 end.
@@ -69,6 +102,7 @@ function wlSortVal(t: Target, key: string, counts: Map<string, TargetCounts>): s
     case "titles": return (t.titles ?? []).join(", ").toLowerCase();
     case "fetch": return (t.fetchMethod ?? "").toLowerCase();
     case "scraped": return t.lastScrapedAt ?? "";
+    case "cooldown": return t.cooldownUntil ?? "";
     case "pipeline": return counts.get(t.name)?.total ?? 0;
     default: return "";
   }
@@ -134,18 +168,22 @@ export default function TargetsTable({
       const r = await fetch("/api/scan/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ staleDays: STALE_DAYS }) });
       const d = await r.json();
       if (d.error) throw new Error(d.error);
-      const { queued = 0, skipped = 0 } = d as { queued: number; skipped: number };
+      const { queued = 0, skipped = 0, cooling = 0 } = d as { queued: number; skipped: number; cooling: number };
       pendo.track("watchlist_scrape_queued", {
         companies_queued: queued,
         companies_skipped: skipped,
+        companies_cooling: cooling,
         stale_days_threshold: STALE_DAYS,
       });
+      // Cooling companies were stale enough to scan and were passed over on purpose — say so, or a
+      // count that doesn't add up reads as a bug.
+      const cooled = cooling ? ` ${cooling} cooling compan${cooling === 1 ? "y was" : "ies were"} skipped.` : "";
       setScrapeMsg(
         queued === 0
           ? skipped > 0
-            ? `Already queued — ${skipped} stale compan${skipped === 1 ? "y is" : "ies are"} waiting in the agent queue.`
-            : "Nothing stale — every watchlisted company was scraped within the last 3 days."
-          : `Queued ${queued} compan${queued === 1 ? "y" : "ies"} for the agent to scan${skipped ? ` (${skipped} already queued)` : ""} — run your the agent queue.`
+            ? `Already queued — ${skipped} stale compan${skipped === 1 ? "y is" : "ies are"} waiting in the agent queue.${cooled}`
+            : `Nothing stale — every watchlisted company was scraped within the last 3 days.${cooled}`
+          : `Queued ${queued} compan${queued === 1 ? "y" : "ies"} for the agent to scan${skipped ? ` (${skipped} already queued)` : ""} — run your the agent queue.${cooled}`
       );
       bump(); // refresh the floating queue so the new jobs show
     } catch {
@@ -406,7 +444,7 @@ export default function TargetsTable({
           <table className="w-full border-separate border-spacing-0 text-left" style={{ tableLayout: "fixed", minWidth: total(WL_COLS) }}>
             <thead>
               <tr>
-                {([["company", "Company"], ["tier", "Tier"], ["titles", "Target titles"], ["fetch", "Fetch"], ["scraped", "Last scraped"], ["pipeline", "Pipeline"]] as const).map(([key, label]) => (
+                {([["company", "Company"], ["tier", "Tier"], ["titles", "Target titles"], ["fetch", "Fetch"], ["scraped", "Last scraped"], ["cooldown", "Cooldown"], ["pipeline", "Pipeline"]] as const).map(([key, label]) => (
                   <ResTh
                     key={key}
                     width={widths[key]}
@@ -462,6 +500,12 @@ export default function TargetsTable({
                       />
                     </Td>
                     <Td className="text-zinc-400 tabular-nums">{t.lastScrapedAt ? ago(t.lastScrapedAt) : "—"}</Td>
+                    <Td>
+                      <CooldownCell
+                        until={t.cooldownUntil}
+                        onSet={(until) => update(t.name, { cooldownUntil: until })}
+                      />
+                    </Td>
                     <Td className="tabular-nums">
                       {c && c.total > 0 ? (
                         <span className="text-zinc-400">
@@ -479,7 +523,9 @@ export default function TargetsTable({
                         <button
                           onClick={(e) => { e.stopPropagation(); scanOne(t.name); }}
                           disabled={scanningRows.has(t.name)}
-                          title={`Scan ${t.name}'s board now (queues an agent scan)`}
+                          title={isCooling(t.cooldownUntil)
+                            ? `${t.name} is cooling until ${t.cooldownUntil} — the bulk scrape skips it, but this scans it anyway`
+                            : `Scan ${t.name}'s board now (queues an agent scan)`}
                           className="inline-flex items-center rounded-md px-2.5 py-1 text-[12px] font-medium text-sky-300 ring-1 ring-inset ring-sky-500/30 transition hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {scanningRows.has(t.name) ? "Scanning…" : "Scan"}

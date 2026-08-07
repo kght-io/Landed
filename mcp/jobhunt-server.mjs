@@ -561,6 +561,8 @@ const TOOLS = [
       "(new company, re-tier, fix ats/slug/endpoint/careersUrl, adjust titles/locations, notes). " +
       "`tier` (tier1/tier2/tier3) is just a tag. This does NOT change the watchlist — " +
       "manage the discovery scan list separately with addToWatchlist / removeFromWatchlist. " +
+      "It DOES own `cooldownUntil`: the date a company that rejected us after a real interview " +
+      "is skipped by discovery until. " +
       "Matched by canonical name: existing is patched (only fields you pass), unknown is added. " +
       "Pass one or many. Use listCompanies to see current state first.",
     inputSchema: {
@@ -603,6 +605,10 @@ const TOOLS = [
                 additionalProperties: false,
               },
               notes: { type: "string", description: "Freeform notes (e.g. \"quant; flat IC titles\")." },
+              cooldownUntil: {
+                type: ["string", "null"],
+                description: "YYYY-MM-DD — discovery skips this company entirely until then (no scans, and anything found is filed away). Set automatically when they reject you after a real interview loop; set it by hand when that rejection's rounds were never logged. Pass null to end a cooldown early. An unparseable date is ignored, not stored.",
+              },
             },
             required: ["name"],
             additionalProperties: false,

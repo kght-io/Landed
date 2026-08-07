@@ -3,6 +3,7 @@ import { db } from "../../db";
 import { companies } from "../../db/schema";
 import { canonical } from "@landed/shared/agents/canonical";
 import { createJob, listJobs } from "../queue";
+import { isCompanyCooling } from "../../db/cooldown";
 
 // watchlist-scan: queueing board scrapes for watchlisted companies.
 //
@@ -13,10 +14,15 @@ import { createJob, listJobs } from "../queue";
 // never), skipping any that already have an outstanding (queued/wip) scan job. Deterministic id per
 // company → idempotent: re-clicking "Scrape watchlist" won't duplicate or disturb in-flight scans.
 // This is the ONLY way watchlist scans enter the queue (the agent no longer self-initiates them).
-export function queueStaleWatchlistScans(staleDays = 3): { queued: number; skipped: number; total: number } {
+export function queueStaleWatchlistScans(staleDays = 3): { queued: number; skipped: number; cooling: number; total: number } {
   const cutoff = Date.now() - staleDays * 86_400_000;
-  const stale = db.select().from(companies).where(eq(companies.watchlist, true)).all()
+  const watched = db.select().from(companies).where(eq(companies.watchlist, true)).all()
     .filter((co) => !co.lastScrapedAt || new Date(co.lastScrapedAt).getTime() < cutoff);
+  // A company cooling off after rejecting you isn't scanned at all — the point of the cooldown is
+  // that its jobs stop arriving, and not scanning is also where the agent tokens are saved.
+  // Counted separately from `skipped` (already in flight) so the UI can say which is which.
+  const stale = watched.filter((co) => !isCompanyCooling(co));
+  const cooling = watched.length - stale.length;
   const statusById = new Map(listJobs().map((j) => [j.id, j.status]));
   let queued = 0, skipped = 0;
   for (const co of stale) {
@@ -26,7 +32,7 @@ export function queueStaleWatchlistScans(staleDays = 3): { queued: number; skipp
     createJob({ id: jid, type: "watchlist-scan", createdBy: "You", params: { company: co.name } });
     queued++;
   }
-  return { queued, skipped, total: stale.length };
+  return { queued, skipped, cooling, total: stale.length };
 }
 
 // Queue a `watchlist-scan` job for ONE watchlisted company on demand (the per-row "Scan now"

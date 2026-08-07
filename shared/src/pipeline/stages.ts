@@ -1,4 +1,5 @@
 import { STATUS_ORDER, type Posting, type Status, type Tier } from "../types";
+import { COOLDOWN_MONTHS, addMonths, hadRealInterview } from "./cooldown";
 
 // The tracker stages — postings graduated past discovery. One unified `candidates` table now: the
 // funnel owns the pre-apply stages, the board/tracker read these. (Home here — a leaf module — so
@@ -139,15 +140,11 @@ export const CHIP_ORDER: Status[] = [
   "applied", "interview", "offer", "accepted", "rejected", "ghost", "withdrawn", "company_skipped", "expired",
 ];
 
-// Reapply policy. A rejection AFTER an interview is off the table for a cooldown
-// period; an auto/email rejection (interviewed=false) or a no-response is eligible.
-export const REAPPLY_COOLDOWN_MONTHS = 6;
-
-function addMonths(isoDate: string, months: number): string {
-  const d = new Date(isoDate + "T00:00:00");
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
-}
+// Reapply policy. A rejection after a REAL interview loop is off the table for a cooldown period; a
+// recruiter-screen or auto/email rejection, and a no-response, are eligible. The bar is
+// `hadRealInterview`, not the loose `interviewed` flag — see pipeline/cooldown.ts for why — so this
+// badge and the company cooldown always state the same policy.
+export const REAPPLY_COOLDOWN_MONTHS = COOLDOWN_MONTHS;
 
 export type ReapplyInfo =
   | { state: "n/a" } // not a closed posting
@@ -166,7 +163,7 @@ export function reapplyInfo(
   // An expired req is closed through no fault of yours → reapply freely when it reopens.
   if (p.status === "expired") return { state: "eligible" };
   // Post-interview rejection → cooldown counted from the rejection date.
-  if (p.status === "rejected" && p.interviewed) {
+  if (p.status === "rejected" && hadRealInterview(p)) {
     const base = p.updatedAt || p.appliedDate;
     if (!base) return { state: "cooldown", until: "?" };
     const until = addMonths(base, REAPPLY_COOLDOWN_MONTHS);

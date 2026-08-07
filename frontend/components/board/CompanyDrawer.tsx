@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Target, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle } from "lucide-react";
 import type { BriefGap, InterviewBrief, InterviewRound, Posting, RedoTurn, SourcedText, Status, Tier } from "@landed/shared/types";
 import { reapplyInfo, STATUS_LABEL, STATUS_CHIP, TIER_META, TIERS } from "@landed/shared/pipeline/stages";
+import { isCooling } from "@landed/shared/pipeline/cooldown";
 import { ROUND_KIND_LABEL } from "@landed/shared/prep/landing";
 import { type CompanyAgg } from "@landed/shared/pipeline/board";
 import InterviewStages from "./InterviewStages";
+import CoolingBadge from "./CoolingBadge";
 import { AttachmentChip, revealPrepFolder } from "./PrepFiles";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import { tailorDiffFor } from "@landed/shared/jobs/redolog";
@@ -865,6 +867,14 @@ export default function CompanyDrawer({
                   <EditField value={p.updatedAt ?? ""} onCommit={(v) => onEditField(p, { updatedAt: v.trim() || undefined })} placeholder="YYYY-MM-DD" className="w-28 tabular-nums text-zinc-200" />
                 </label>
                 <InterviewedToggle p={p} onSetInterviewed={onSetInterviewed} />
+                {isCooling(p.cooldownUntil) && (
+                  <CoolingBadge
+                    until={p.cooldownUntil!}
+                    title={`Discovery is skipping ${p.company} until ${p.cooldownUntil}. Clear it on the Targets table.`}
+                  >
+                    no new jobs until {p.cooldownUntil}
+                  </CoolingBadge>
+                )}
               </div>
               {rounds.length > 0 && <div><SectionLabel>Interview history</SectionLabel><InterviewStages p={p} rounds={rounds} /></div>}
               {p.comp && <div><SectionLabel>Comp structure</SectionLabel><p className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-400">{p.comp}</p></div>}

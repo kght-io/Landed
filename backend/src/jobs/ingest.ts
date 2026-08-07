@@ -3,6 +3,7 @@ import { db } from "../db";
 import { companies, postings } from "../db/schema";
 import type { CompanyRow, PostingRow } from "../db/schema";
 import { logEvent, enqueueUnboundResult, upsertInterviews } from "../db/queries";
+import { isCompanyCooling } from "../db/cooldown";
 import { reconcile } from "../agents/reconcile";
 import { incomingFromInboxRecords, incomingRounds } from "@landed/shared/agents/sources/inbox";
 import { canonical, norm } from "@landed/shared/agents/canonical";
@@ -301,6 +302,9 @@ export function ingestDiscovered(source: string) {
   return (records: ResultRecord[], dryRun?: boolean): ReconcileResult => {
     const details: ChangeDetail[] = [];
     let inserted = 0, updated = 0;
+    // One "today" for the whole batch: a scan result is judged against the day it's ingested, and
+    // this keeps the cooldown check from re-deriving the date per record.
+    const at = new Date().toISOString().slice(0, 10);
     for (const r of records) {
       const company = str(r.company) ?? "";
       const key = canonical(company)?.key;
@@ -313,16 +317,24 @@ export function ingestDiscovered(source: string) {
         const ts = new Date().toISOString();
         co = db.insert(companies).values({ name: company, tier: "tier3", createdAt: ts, updatedAt: ts }).returning().get();
       }
+      // A company cooling off after rejecting you gets its finds filed away instead of queued: the
+      // row is kept (so it's there when the cooldown lapses) but it never reaches the funnel, and
+      // no fit work is spent on it.
+      const cooling = isCompanyCooling(co, at);
+      const state = cooling ? "filtered" : "fit_queue";
+      const where = cooling ? "filed (company cooling off)" : "fit queue";
       const list = db.select().from(postings).where(eq(postings.companyId, co.id)).all();
       const existing = (url ? list.find((c) => c.url === url) : undefined) ?? list.find((c) => c.title.toLowerCase() === role.toLowerCase());
       if (existing) {
-        if (!dryRun) db.update(postings).set({ state: "fit_queue" }).where(eq(postings.id, existing.id)).run();
-        details.push({ action: "update", summary: `${co.name} — ${role} · → fit queue` }); updated++;
+        // Don't drag a row BACK out of the funnel just because the company is now cooling — that's
+        // the read-side's job, and demoting live work here would lose it.
+        if (!dryRun && !cooling) db.update(postings).set({ state }).where(eq(postings.id, existing.id)).run();
+        details.push({ action: "update", summary: `${co.name} — ${role} · → ${where}` }); updated++;
       } else {
-        if (!dryRun) db.insert(postings).values({ companyId: co.id, title: role, location: str(r.location) ?? null, url: url ?? null, department: null, verdict: "kept", reason: null, state: "fit_queue", scannedAt: new Date().toISOString() }).run();
-        details.push({ action: "insert", summary: `${co.name} — ${role} · added to fit queue` }); inserted++;
+        if (!dryRun) db.insert(postings).values({ companyId: co.id, title: role, location: str(r.location) ?? null, url: url ?? null, department: null, verdict: cooling ? "dropped" : "kept", reason: cooling ? "cooldown" : null, state, scannedAt: new Date().toISOString() }).run();
+        details.push({ action: "insert", summary: `${co.name} — ${role} · added to ${where}` }); inserted++;
       }
-      if (!dryRun) logEvent({ actor: "CoWork", source, entity: "company", entityId: co.id, action: existing ? "update" : "insert", summary: `${co.name} — ${role} · watchlist-scan → fit queue` });
+      if (!dryRun) logEvent({ actor: "CoWork", source, entity: "company", entityId: co.id, action: existing ? "update" : "insert", summary: `${co.name} — ${role} · watchlist-scan → ${where}` });
     }
     return { inserted, updated, fieldChanges: updated, flagged: 0, pending: 0, newCompanies: 0, summary: `${inserted} added, ${updated} requeued`, details };
   };

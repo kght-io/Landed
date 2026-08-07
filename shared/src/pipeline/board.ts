@@ -78,15 +78,3 @@ export function groupReapply(items: Posting[]): GroupReapply {
     .sort();
   return { state: "cooldown", until: untils[0] };
 }
-
-// Companies under an active reapply cooldown → the soonest date they free up.
-// A cooldown is a company-wide signal, so every posting at the company inherits it
-// (e.g. a freshly-discovered role at a company that already rejected you).
-export function companyCooldowns(postings: Posting[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const g of groupByCompany(postings)) {
-    const r = groupReapply(g.items);
-    if (r.state === "cooldown" && r.until) out[g.company] = r.until;
-  }
-  return out;
-}

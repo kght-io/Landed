@@ -4,6 +4,9 @@ import { companies, events, interviews, pendingMatches, postings } from "./schem
 import type { PostingRow, CompanyRow, EventRow } from "./schema";
 import { canonical, defaultTier, norm } from "@landed/shared/agents/canonical";
 import { emitStageChange } from "./stage-change";
+import { logEvent, by } from "./events";
+import { applyRejectionCooldown, coolingCompanyIds, isCompanyCooling, setCompanyCooldown } from "./cooldown";
+import { isHiddenWhileCooling } from "@landed/shared/pipeline/cooldown";
 import { parseRedoLog } from "@landed/shared/jobs/redolog";
 import { parseBriefs } from "@landed/shared/jobs/briefs";
 import { isExcludedTitle } from "@landed/shared/jobs/exclude";
@@ -72,6 +75,7 @@ function toPosting(a: PostingRow, c: CompanyRow, rounds?: InterviewRound[]): Pos
     company: c.name,
     tier: c.tier as Tier,
     watchlist: !!c.watchlist,
+    cooldownUntil: c.cooldownUntil,
     role: a.title ?? "—",
     location: a.location ?? undefined,
     url: a.url ?? undefined,
@@ -214,40 +218,9 @@ export function deleteInterviewRound(roundId: number): Posting | null {
 }
 
 // --- change log ---
-type LogArgs = {
-  actor?: string; // default You (UI is the human)
-  source?: string; // default ui
-  entity?: string;
-  entityId?: number;
-  action: string;
-  field?: string;
-  oldValue?: string;
-  newValue?: string;
-  summary: string;
-};
-export function logEvent(a: LogArgs) {
-  db.insert(events)
-    .values({
-      ts: new Date().toISOString(),
-      actor: a.actor ?? "You",
-      source: a.source ?? "ui",
-      entity: a.entity ?? "application",
-      entityId: a.entityId,
-      action: a.action,
-      field: a.field,
-      oldValue: a.oldValue,
-      newValue: a.newValue,
-      summary: a.summary,
-    })
-    .run();
-}
-
-// Actor/source overlay for a logEvent spread. An undefined actor → {} so logEvent keeps its
-// app-UI defaults (You / "ui"); a named actor (e.g. "CoWork" for an MCP-driven edit) tags both
-// the actor and a matching source so a bot edit isn't mislabeled as a manual "ui" change. The
-// caller passes the actor it read from the request (see actorFromRequest in the API routes).
-const by = (actor?: string): { actor?: string; source?: string } =>
-  actor ? { actor, source: "cowork" } : {};
+// logEvent + `by` live in ./events (a leaf), so cooldown.ts and friends can append audit rows
+// without importing this module. Re-exported because callers have always read them from here.
+export { logEvent, by };
 
 // The tracker: postings in a tracker stage (applied onward). Discovery-stage rows stay in the funnel.
 export function listPostings(): Posting[] {
@@ -375,6 +348,11 @@ export function updateApplication(id: number, patch: ApplicationPatch, actor?: s
   // Announce the stage move; the jobs layer decides what it's worth (entering `interview` earns a
   // one-shot prep-research job). This file deliberately doesn't know that — see ./stage-change.ts.
   if (patch.status) emitStageChange({ companyId: rawBefore.companyId, from: rawBefore.state, to: patch.status });
+
+  // A rejection may have just earned this company a cooldown (or extended one). Recomputed from the
+  // company's postings rather than from this patch, so it sees the interview rounds that decide
+  // whether the rejection came after a real loop — and so a backdated `updatedAt` backdates it too.
+  if (patch.status === "rejected") applyRejectionCooldown(rawBefore.companyId, id);
 
   // One event per changed field, capturing field + old → new so the change log is auditable.
   const fmt = (v: unknown) => (v == null || v === "" ? undefined : String(v));
@@ -504,6 +482,7 @@ export type CompanyInput = {
   leveling?: Leveling | null; // → leveling (JSON): the company's levels.fyi ladder, Amazon-anchored
   notes?: string | null;
   lastScrapedAt?: string | null; // ISO; usually auto-stamped on discovery, but settable here too
+  cooldownUntil?: string | null; // YYYY-MM-DD; discovery skips this company until then. null clears it.
 };
 
 // Upsert company records — The agent curates these as you chat. Matched by canonical name: an
@@ -536,6 +515,9 @@ export function upsertCompanies(
     if (t.location !== undefined) patch.targetLocation = t.location;
     if (t.leveling !== undefined) patch.leveling = t.leveling ? JSON.stringify(t.leveling) : null;
     if (t.lastScrapedAt !== undefined) patch.lastScrapedAt = t.lastScrapedAt;
+    // cooldownUntil is deliberately NOT patched here — it's written after the upsert, through
+    // setCompanyCooldown, so a hand-set date goes through the same validation and lands the same
+    // audit row as an automatic one. See ./cooldown.ts.
 
     const existing = all.find((x) => canonical(x.name)?.key === c.key);
     if (existing) {
@@ -547,6 +529,7 @@ export function upsertCompanies(
         });
         updated++;
       }
+      if (t.cooldownUntil !== undefined) setCompanyCooldown(existing.id, t.cooldownUntil, meta);
       out.push(db.select().from(companies).where(eq(companies.id, existing.id)).get()!);
     } else {
       const tier = t.tier ?? defaultTier(c.key);
@@ -557,6 +540,7 @@ export function upsertCompanies(
         summary: `new company ${c.name} [${tier}]`,
       });
       inserted++;
+      if (t.cooldownUntil !== undefined) setCompanyCooldown(id, t.cooldownUntil, meta);
       out.push(db.select().from(companies).where(eq(companies.id, id)).get()!);
     }
   }
@@ -639,13 +623,17 @@ const parseEmailRefs = (s: string | null): EmailRefs | undefined => {
 export function scannedBucketCounts(terms?: string[]): Record<string, number> {
   const clean = (terms ?? []).map((t) => t.trim()).filter(Boolean);
   const rows = clean.length
-    ? db.select({ state: postings.state }).from(postings)
+    ? db.select({ state: postings.state, companyId: postings.companyId }).from(postings)
         .innerJoin(companies, eq(postings.companyId, companies.id))
         .where(or(...clean.map((t) => like(companies.name, `%${t}%`))))
         .all()
-    : db.select({ state: postings.state }).from(postings).all();
+    : db.select({ state: postings.state, companyId: postings.companyId }).from(postings).all();
+  const cooling = coolingCompanyIds();
   const c: Record<string, number> = {};
-  for (const r of rows) c[r.state] = (c[r.state] ?? 0) + 1;
+  for (const r of rows) {
+    if (isHiddenWhileCooling(cooling, r)) continue;
+    c[r.state] = (c[r.state] ?? 0) + 1;
+  }
   return c;
 }
 
@@ -654,6 +642,9 @@ export function scannedBucketCounts(terms?: string[]): Record<string, number> {
 // (e.g. "fit_queue,assessed,apply_later").
 export function listScannedPostings(f: { company?: string; state?: string } = {}): ScannedView[] {
   const states = f.state ? new Set(f.state.split(",")) : null;
+  // A cooling company's untriaged finds are hidden, not deleted — they reappear the day the
+  // cooldown lapses or you clear it. Tailoring work stays visible (see isHiddenWhileCooling).
+  const cooling = coolingCompanyIds();
   return db
     .select({
       id: postings.id, company: companies.name, companyId: postings.companyId,
@@ -670,6 +661,7 @@ export function listScannedPostings(f: { company?: string; state?: string } = {}
     .all()
     .map((p) => ({ ...p, fit: parseFit(p.fitDetail), redoLog: parseRedoLog(p.redoLog), comments: parseComments(p.comments), leveling: parseLeveling(p.leveling) }))
     .filter((p) => (!f.company || p.company === f.company) && (!states || states.has(p.state)))
+    .filter((p) => !isHiddenWhileCooling(cooling, p))
     .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
 }
 
@@ -754,9 +746,13 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outc
   // Shared exclude — the same filter the api scan uses — overrides the agent's call (EM/TPM/
   // Security/intern/Solutions etc.), so every fetch method gets a uniform floor.
   const excluded = isExcludedTitle(title, department);
-  const glance = excluded ? "drop" : v.glance;
+  // Same shape of server-side override as the exclude filter: a company cooling off after rejecting
+  // you doesn't get its finds put in front of you, whatever the agent thought of them.
+  const cooling = isCompanyCooling(co);
+  const glance = excluded || cooling ? "drop" : v.glance;
   // high & low both go to `review` (you triage them in the Scan-results tab); only drop is discarded.
-  const state = (glance === "drop" ? "dismissed" : "review") as "review" | "dismissed";
+  // A cooled find is `filtered`, not `dismissed` — filed by a rule, not a decision you made.
+  const state = (cooling ? "filtered" : glance === "drop" ? "dismissed" : "review") as "review" | "dismissed" | "filtered";
   const outcome: "review" | "discarded" = glance === "drop" ? "discarded" : "review";
   const fields = {
     title,
@@ -764,7 +760,7 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outc
     url: v.url ?? row?.url ?? null,
     department,
     verdict: (glance === "drop" ? "dropped" : "kept") as "kept" | "dropped",
-    reason: excluded ? "excluded" : v.reason ?? null,
+    reason: cooling ? "cooldown" : excluded ? "excluded" : v.reason ?? null,
     state,
   };
 

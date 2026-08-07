@@ -304,6 +304,7 @@ function connection() {
     ["leveling", "leveling TEXT"],
     ["last_scraped_at", "last_scraped_at TEXT"],
     ["watchlist", "watchlist INTEGER NOT NULL DEFAULT 0"],
+    ["cooldown_until", "cooldown_until TEXT"], // YYYY-MM-DD; discovery skips this company until then
     ["created_at", "created_at TEXT"], // company-record audit timestamps (curation, not auto-scrape)
     ["updated_at", "updated_at TEXT"],
   ] as const) {

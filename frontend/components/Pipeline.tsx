@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, Bold, Bot, Check, ChevronDown, ChevronRight, Coins, ExternalLink, GitCompareArrows, Info, List, Loader2, Mail, MessageSquare, MoreHorizontal, Pencil, Pin, RefreshCw, Trash2, X } from "lucide-react";
+import { ArrowRight, Bold, Bot, Check, ChevronDown, ChevronRight, Coins, ExternalLink, GitCompareArrows, Info, List, Loader2, Mail, MessageSquare, MoreHorizontal, Pencil, Pin, RefreshCw, Trash2, UserCheck, X } from "lucide-react";
 import PopoverPanel, { anchorFrom } from "@/components/Popover";
 import { columnOf, fitColor, statusesForColumn, STATUS_CHIP, STATUS_LABEL, trackerDate, type ColumnId } from "@landed/shared/pipeline/stages";
 import TrackerTag from "@/components/TrackerTag";
@@ -17,6 +17,10 @@ import ResumeDiffModal from "@/components/ResumeDiff";
 import PeerCompModal from "@/components/PeerCompModal";
 import { tailorDiffFor, lastTailoredAt } from "@landed/shared/jobs/redolog";
 import { aggregateCompanies, type CompanyAgg } from "@landed/shared/pipeline/board";
+import {
+  applyClosedFilter, closedFilterCounts, resolveClosedFilter, NO_CLOSED_FILTER,
+  type ClosedFilter as ClosedFilterState,
+} from "@landed/shared/pipeline/closed-filter";
 import { ResTh } from "@/components/ResizableTable";
 import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, stepCount, type SpineStep } from "@landed/shared/pipeline/discovery";
 import type { Comment, Posting, FitAssessment, RedoTurn, Status } from "@landed/shared/types";
@@ -526,7 +530,7 @@ export default function Pipeline() {
   const [bucketCounts, setBucketCounts] = useState<Record<string, number> | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [sort, setSort] = useState<Sort | null>(null);
-  const [closedFilter, setClosedFilter] = useState<Status | "all">("all"); // Closed step sub-filter
+  const [closedFilter, setClosedFilter] = useState<ClosedFilterState>(NO_CLOSED_FILTER); // Closed step sub-filter: outcome × interviewed
 
   // Leveling reference (one fetch) flows to both the editor panel and the funnel's level popover.
   const [levelingRef, setLevelingRef] = useState<LevelingRef | null>(null);
@@ -631,9 +635,10 @@ export default function Pipeline() {
   // several outcomes, so it offers a per-status chip filter.
   const trackerBase = isTracker ? postings.filter((p) => columnOf(p) === STEP_COLUMN[tab]) : [];
   const closedPresent = tab === "closed" ? statusesForColumn("closed").filter((s) => trackerBase.some((p) => p.status === s)) : [];
-  const effClosed: Status | "all" =
-    tab === "closed" && closedFilter !== "all" && trackerBase.some((p) => p.status === closedFilter) ? closedFilter : "all";
-  const trackerPostings = effClosed !== "all" ? trackerBase.filter((p) => p.status === effClosed) : trackerBase;
+  // Narrowed so a selection can never point at an empty table (a status that's since drained away,
+  // or "interviewed" within an outcome that has none) — see resolveClosedFilter.
+  const effClosed = tab === "closed" ? resolveClosedFilter(trackerBase, closedFilter) : NO_CLOSED_FILTER;
+  const trackerPostings = tab === "closed" ? applyClosedFilter(trackerBase, effClosed) : trackerBase;
 
   // The active step's rows, normalized to one model.
   const raw: FRow[] | null = isTracker
@@ -1175,7 +1180,9 @@ export default function Pipeline() {
 
         {/* Closed collapses several outcomes — offer a per-status sub-filter. Kept OUT of the scroll
             container below so it stays fixed instead of sliding horizontally with the table columns. */}
-        {tab === "closed" && closedPresent.length >= 2 && (
+        {/* One outcome but some interviews still earns the row — that's the case the Interviewed
+            pill is most useful in (an all-rejected Closed step). */}
+        {tab === "closed" && (closedPresent.length >= 2 || trackerBase.some((p) => p.interviewed)) && (
           <div className="shrink-0 px-6 pt-4">
             <ClosedFilter present={closedPresent} base={trackerBase} active={effClosed} onChange={setClosedFilter} />
           </div>
@@ -1499,18 +1506,20 @@ function StepBtn({ step, count, active, onClick }: { step: SpineStep; count?: nu
   );
 }
 
-// Per-status sub-filter for the Closed step — "all" plus each present closed status, with counts.
-function ClosedFilter({ present, base, active, onChange }: { present: Status[]; base: Posting[]; active: Status | "all"; onChange: (s: Status | "all") => void }) {
+// Sub-filter for the Closed step: which outcome, and whether you actually interviewed. Two
+// independent axes that COMBINE — "Rejected + Interviewed" answers "who turned me down after a real
+// loop?", which the outcome pills alone can't. Counts are faceted (see closedFilterCounts): each
+// pill promises what clicking it would actually give you, holding the other axis where it is.
+function ClosedFilter({ present, base, active, onChange }: { present: Status[]; base: Posting[]; active: ClosedFilterState; onChange: (f: ClosedFilterState) => void }) {
+  const counts = closedFilterCounts(base, active);
+  const chipCls = (on: boolean) =>
+    `flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition ${
+      on ? "border-transparent bg-zinc-100 text-zinc-900" : "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+    }`;
   const chip = (key: Status | "all", label: string, n: number) => {
-    const on = active === key;
+    const on = active.status === key;
     return (
-      <button
-        key={key}
-        onClick={() => onChange(key)}
-        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition ${
-          on ? "border-transparent bg-zinc-100 text-zinc-900" : "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-        }`}
-      >
+      <button key={key} onClick={() => onChange({ ...active, status: key })} className={chipCls(on)}>
         {label}
         <span className={`tabular-nums ${on ? "text-zinc-500" : "text-zinc-600"}`}>{n}</span>
       </button>
@@ -1518,8 +1527,21 @@ function ClosedFilter({ present, base, active, onChange }: { present: Status[]; 
   };
   return (
     <div className="mb-4 flex flex-wrap items-center gap-1.5">
-      {chip("all", "all", base.length)}
-      {present.map((s) => chip(s, STATUS_LABEL[s], base.filter((p) => p.status === s).length))}
+      {chip("all", "all", counts.all)}
+      {present.map((s) => chip(s, STATUS_LABEL[s], counts.byStatus[s] ?? 0))}
+      {counts.interviewed > 0 && (
+        <>
+          <span className="mx-1 h-4 w-px bg-zinc-800" aria-hidden />
+          <button
+            onClick={() => onChange({ ...active, interviewed: !active.interviewed })}
+            title="Only postings that reached the interview stage — including ones that got no further than a recruiter screen"
+            className={chipCls(active.interviewed)}
+          >
+            <UserCheck size={12} /> Interviewed
+            <span className={`tabular-nums ${active.interviewed ? "text-zinc-500" : "text-zinc-600"}`}>{counts.interviewed}</span>
+          </button>
+        </>
+      )}
     </div>
   );
 }

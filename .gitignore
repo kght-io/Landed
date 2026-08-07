@@ -51,6 +51,8 @@ frontend/next-env.d.ts
 
 # Machine-specific local serving config (hardcoded absolute paths — not portable)
 /scripts/landed.Caddyfile
+# …and the proxy's state dir, created root-owned by the launchd service
+/caddy/
 /scripts/com.kaung.landed-proxy.plist
 
 # Claude Code local (personal, uncommitted) settings

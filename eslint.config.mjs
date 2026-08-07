@@ -29,6 +29,10 @@ const eslintConfig = defineConfig([
     // `data/` holds the SQLite DB and generated assets — no lintable source, and eslint
     // shouldn't walk it.
     "data/**",
+    // `caddy/` is the local proxy's state dir, created root-owned by the launchd service. No
+    // lintable source, and walking it fails the whole run with EACCES — which took out the
+    // pre-push hook.
+    "caddy/**",
   ]),
 ]);
 

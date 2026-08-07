@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Loader2, ChevronRight, FileText, AlertTriangle, RotateCcw } from "lucide-react";
+import { BellOff, Bot, Loader2, ChevronRight, FileText, AlertTriangle, RotateCcw } from "lucide-react";
 import { ago } from "@landed/shared/format/time";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import AgentsLive from "@/components/AgentsLive";
@@ -9,7 +9,8 @@ import AgentMonitor, { type MonitorJob } from "@/components/agents/AgentMonitor"
 import Playbook from "@/components/agents/Playbook";
 import TabBar from "@/components/prep/TabBar";
 import McpDocsPanel from "@/components/mcp/McpDocsPanel";
-import { AUTO_WORK_KEY } from "@/components/AutoWorkController";
+import { AUTO_WORK_IGNORED_KEY, AUTO_WORK_KEY } from "@/components/AutoWorkController";
+import { personaFor } from "@landed/shared/agents/personas";
 
 type JobView = MonitorJob;
 type JobTypeMeta = { type: string; title: string; description: string; playbook: string };
@@ -37,6 +38,21 @@ function AutoWorkToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) 
   );
 }
 
+// The only way back from a dealt-with backlog notice (AutoWorkController): those agents work any
+// backlog silently from then on, so surface that they're doing it — and let one click un-silence them.
+function IgnoredAgentsReset({ types, onReset }: { types: string[]; onReset: () => void }) {
+  if (!types.length) return null;
+  return (
+    <button
+      onClick={onReset}
+      title={`Working big backlogs silently: ${types.map(personaFor).join(", ")}. Click to be told again.`}
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5 text-[12px] font-medium text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-300"
+    >
+      <BellOff size={13} /> {types.length} ignored
+    </button>
+  );
+}
+
 // One health metric in the Monitor dashboard strip.
 function StatCard({ label, value, tone }: { label: string; value: number; tone: "zinc" | "sky" | "emerald" | "amber" }) {
   const cls = { zinc: "text-zinc-100", sky: "text-sky-300", emerald: "text-emerald-300", amber: "text-amber-300" }[tone];
@@ -56,6 +72,7 @@ function StatCard({ label, value, tone }: { label: string; value: number; tone: 
 export default function AgentsView() {
   const [view, setView] = usePersistentState<string>("landed.agents.view", "chat");
   const [autoWork, setAutoWork] = usePersistentState<boolean>(AUTO_WORK_KEY, true);
+  const [ignoredAgents, setIgnoredAgents] = usePersistentState<string[]>(AUTO_WORK_IGNORED_KEY, []);
   const [types, setTypes] = useState<JobTypeMeta[]>([]);
   const [playbooks, setPlaybooks] = useState<string[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
@@ -125,7 +142,10 @@ export default function AgentsView() {
               Live agents that read &amp; write your pipeline over MCP.{lastActive && <> Last active {ago(lastActive)}.</>}
             </p>
           </div>
-          <AutoWorkToggle on={autoWork} onChange={setAutoWork} />
+          <div className="flex shrink-0 items-center gap-2">
+            <IgnoredAgentsReset types={ignoredAgents} onReset={() => setIgnoredAgents([])} />
+            <AutoWorkToggle on={autoWork} onChange={setAutoWork} />
+          </div>
         </div>
         <div className="mt-3"><TabBar tabs={tabs} active={activeTab} onChange={setView} /></div>
       </header>

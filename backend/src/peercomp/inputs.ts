@@ -1,10 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
 import { inArray } from "drizzle-orm";
 import { db } from "../db";
 import { postings, companies } from "../db/schema";
-import { canonical } from "@landed/shared/agents/canonical";
-import { PREP_ROOT } from "../prep/export-context";
+import { companySlug } from "../db/prep";
+import { listPrepEmails } from "../db/prep-assets";
 
 // The raw comp signal the app already holds for one interviewing role: stored comp notes + JD +
 // whatever recruiter emails inbox capture wrote to disk. The peer-comp the agent job embeds this roster
@@ -19,23 +17,24 @@ export type RoleInput = { company: string; role: string; comp?: string; note?: s
 const CLIP = 4000; // per-field char cap so long JDs/emails don't blow the task instruction
 const clip = (s: string, n = CLIP) => (s.length > n ? `${s.slice(0, n)}\n…[truncated]` : s);
 
-// Gather one entry per posting in the interview/offer stage, with whatever comp signal we have on
-// disk + in the DB. Pure DB/FS read — unit-testable, no model call.
+// Gather one entry per posting in the interview/offer stage, with whatever comp signal we have in
+// the DB. Pure DB read — unit-testable, no model call.
+//
+// The captured emails used to be read off `interview-prep/<slug>/emails.md`; they're rows now
+// (db/prep-assets.ts), so this renders the bodies back into one block per company. Same text the
+// agent used to see, minus the dependence on a file that only existed on the user's laptop.
 export function gatherPeerInputs(): RoleInput[] {
   const coName = new Map(db.select().from(companies).all().map((c) => [c.id, c.name] as const));
   const rows = db.select().from(postings).where(inArray(postings.state, ["interview", "offer"])).all();
   return rows.map((r) => {
     const company = coName.get(r.companyId) ?? "";
-    const slug = canonical(company)?.key;
-    let emails: string | undefined;
-    if (slug) {
-      const p = path.join(PREP_ROOT, slug, "emails.md");
-      try {
-        emails = fs.existsSync(p) ? fs.readFileSync(p, "utf8").trim() || undefined : undefined;
-      } catch {
-        emails = undefined;
-      }
-    }
+    const mail = company ? listPrepEmails(companySlug(company)) : [];
+    const emails = mail.length
+      ? mail
+          .map((e) => [[e.subject, e.from, e.date].filter(Boolean).join(" · "), e.body.trim()].filter(Boolean).join("\n"))
+          .join("\n\n")
+          .trim() || undefined
+      : undefined;
     return {
       company,
       role: r.title,

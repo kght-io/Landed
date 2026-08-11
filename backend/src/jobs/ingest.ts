@@ -8,7 +8,9 @@ import { reconcile } from "../agents/reconcile";
 import { incomingFromInboxRecords, incomingRounds } from "@landed/shared/agents/sources/inbox";
 import { canonical, norm } from "@landed/shared/agents/canonical";
 import { ingestPrepRecords, ingestPrepResearch, ingestLeetcodeAdd, companySlug } from "../db/prep";
-import { exportPrepContextFor, exportQuestionsFor } from "../prep/export-context";
+import { upsertPrepEmails } from "../db/prep-assets";
+import { exportPrepContextFor, exportQuestionsFor, exportEmailsFor } from "../prep/export-context";
+import { incomingEmails } from "@landed/shared/agents/emails";
 import { str, num, describeWarnings } from "@landed/shared/util/coerce";
 import { parseRedoLog, nextVersion } from "@landed/shared/jobs/redolog";
 import { parseBriefs, nextBriefVersion, coerceGaps, coerceSourced } from "@landed/shared/jobs/briefs";
@@ -105,25 +107,47 @@ export function ingestCandidateUpdates(
   return { inserted: 0, updated, fieldChanges: updated, flagged: 0, pending: unbound, newCompanies: 0, summary, details };
 }
 
-// interview-emails record { id, rounds:[...] }: the deep per-company read of the interviewing
-// threads. It still writes emails.md + attachments for agent chat, but the loop itself — who you're
-// meeting, exactly when, the format, what they said to expect, how they said to prepare — now lands
-// on the `interviews` rows so the drawer can show it. Before this it existed only as prose in a file
-// nothing in the app read.
+// interview-emails record { id, rounds:[...], emails:[...] }: the deep per-company read of the
+// interviewing threads, landing in two places.
 //
-// Division of labour: inbox-sync (cheap, global, daily) owns stage + kind/date/outcome; this owns
-// the substance. upsertInterviews merges per field, so each writer's silence preserves the other's
-// values — but where this job DOES report a date or outcome it wins, because it read the whole
-// thread rather than classifying one email.
+//   `rounds` → the `interviews` rows: who you're meeting, exactly when, the format, what they said
+//     to expect, how they said to prepare. The loop, as structure the drawer can render.
+//   `emails` → the `prep_emails` rows: one row per message, with its thread id, sender and date.
+//     This used to be a prose `emails.md` the job wrote straight to the user's disk — knowledge a
+//     hosted backend can't see and nothing in the app read back. The rows are the record now, and
+//     emails.md is regenerated from them (see prep/export-context.ts exportEmailsFor).
+//
+// Both are optional: a run that captures only mail, or only the loop, is valid. Attachments stay on
+// disk — they're artifacts (PDFs), not knowledge, so chat never needs them.
+//
+// Division of labour on the loop: inbox-sync (cheap, global, daily) owns stage + kind/date/outcome;
+// this owns the substance. upsertInterviews merges per field, so each writer's silence preserves the
+// other's values — but where this job DOES report a date or outcome it wins, because it read the
+// whole thread rather than classifying one email.
 export function ingestInterviewLoop(records: ResultRecord[], dryRun?: boolean): ReconcileResult {
-  return ingestCandidateUpdates(records, dryRun, "interview-emails", "loops captured", (r, cand, co) => {
+  return ingestCandidateUpdates(records, dryRun, "interview-emails", "captured", (r, cand, co) => {
     const rounds = incomingRounds(r.rounds ?? r.interviews);
-    if (!rounds?.length) return null; // asset-only run (emails.md written, nothing structured to land)
-    const n = upsertInterviews(cand.id, rounds, { dryRun: true }); // count first — the summary needs it
-    if (!n) return null; // re-capture with nothing new
+    const emails = incomingEmails(r.emails);
+    // Emails are keyed by COMPANY, not posting — a company's mail spans every role you've talked to
+    // them about, and it's the same key the interview-prep/<slug>/ folder uses.
+    const slug = companySlug(co.name);
+    const nRounds = rounds?.length ? upsertInterviews(cand.id, rounds, { dryRun: true }) : 0;
+    const nEmails = emails?.length ? upsertPrepEmails(slug, emails, { dryRun: true }) : 0;
+    if (!nRounds && !nEmails) return null; // asset-only run, or a re-capture with nothing new
+    const parts = [
+      nRounds ? `${nRounds} interview round${nRounds === 1 ? "" : "s"} detailed` : null,
+      nEmails ? `${nEmails} email${nEmails === 1 ? "" : "s"} captured` : null,
+    ].filter(Boolean);
     return {
-      summary: `${co.name} — ${cand.title} · ${n} interview round${n === 1 ? "" : "s"} detailed`,
-      apply: () => { upsertInterviews(cand.id, rounds); },
+      summary: `${co.name} — ${cand.title} · ${parts.join(" · ")}`,
+      apply: () => {
+        if (rounds?.length) upsertInterviews(cand.id, rounds);
+        if (emails?.length) {
+          upsertPrepEmails(slug, emails);
+          // Refresh the folder the brief job and the prep chat read, now that the rows moved.
+          try { exportEmailsFor(slug); } catch { /* dump is best-effort */ }
+        }
+      },
     };
   });
 }

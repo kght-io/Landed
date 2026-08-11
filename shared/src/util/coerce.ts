@@ -9,6 +9,15 @@ export const num = (v: unknown): number | null => {
   return Number.isNaN(n) ? null : n;
 };
 
+// Loose JSON → a list of trimmed strings (a how-to-prepare list, a set of filenames). A single
+// value is accepted as a one-item list; empties drop out, and an empty result is undefined so it
+// never overwrites a stored list with nothing.
+export const strList = (v: unknown): string[] | undefined => {
+  const arr = Array.isArray(v) ? v : [v];
+  const out = arr.map((x) => str(x)).filter((x): x is string => !!x);
+  return out.length ? out : undefined;
+};
+
 // --- reporting the fallbacks -------------------------------------------------------------------
 // str/num answer "what is this value?". The rest of this file answers "what did we do when we
 // couldn't tell?".

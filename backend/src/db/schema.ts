@@ -272,6 +272,50 @@ export const prepFeedback = sqliteTable("prep_feedback", {
   appliedAt: text("applied_at"), // ISO; stamped when the agent's refresh lands
 });
 
+// ── Prep knowledge: transcripts + emails ──
+// The knowledge half of the interview-prep folder. Both used to exist ONLY as markdown on the
+// user's disk (`transcripts/transcript-N.md`, `emails.md`), which a hosted backend can't read — so
+// they moved here and the files became regenerated dumps (the pattern context.md already follows).
+// Artifacts (résumés, PDF attachments) deliberately stayed on disk: chat never needs them.
+//
+// Keyed by the canonical company slug (db/prep.ts companySlug) — the SAME key as prepCompany.slug
+// and the interview-prep/<slug>/ folder, NOT the posting slug from slugFor(). A company's calls and
+// mail span every role you've talked to them about, so a posting id would be the wrong grain.
+export const prepTranscripts = sqliteTable("prep_transcripts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(), // transcript-N.md — the dump filename AND the per-company unique key
+  title: text("title"), // optional round label, rendered as the H1 in the dump
+  body: text("body").notNull(),
+  createdAt: text("created_at").notNull(), // ISO
+});
+
+// One row per EMAIL — not per thread and not per company. An email is the natural retrieval chunk,
+// and the per-row metadata (who, when, which thread) is exactly the filtering a single prose blob
+// threw away. `threadId` is the join back to the Gmail ids already in postings.emailRefs and
+// interviews.emailId, so a future read helper can hydrate an email's siblings when one match doesn't
+// carry the whole answer.
+export const prepEmails = sqliteTable("prep_emails", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").notNull(),
+  // Per-company dedup key (shared/src/agents/emails.ts prepEmailKey): the Gmail message id when we
+  // have one, else thread+date+subject, else a body fingerprint. Makes a re-capture a no-op.
+  dedupKey: text("dedup_key").notNull(),
+  threadId: text("thread_id"), // Gmail thread id — joins postings.email_refs / interviews.email_id
+  messageId: text("message_id"),
+  subject: text("subject"),
+  sender: text("sender"), // the From header as stated ("Steve Cosme <stephen@acme.com>")
+  recipients: text("recipients"), // JSON string[]
+  sentAt: text("sent_at"), // when it was sent — the sort key within a company
+  round: integer("round"), // the loop round this mail is about, when it's clearly about one
+  attachments: text("attachments"), // JSON string[] — files saved under interview-prep/<slug>/attachments/
+  body: text("body").notNull(),
+  // Where the row came from: `interview-emails` (the job) or `backfill` (the one-time import of the
+  // pre-migration emails.md prose blobs, which have no per-email headers to recover).
+  source: text("source").notNull().default("interview-emails"),
+  capturedAt: text("captured_at").notNull(), // ISO — when the row landed, not when the mail was sent
+});
+
 // Append-only practice log. Powers "how many times" (count) and "time record" (min duration).
 export const prepAttempts = sqliteTable("prep_attempts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -418,6 +462,9 @@ export const fitVerdicts = sqliteTable("fit_verdicts", {
 export type FitCriterionRow = typeof fitCriteria.$inferSelect;
 export type FitRunRow = typeof fitRuns.$inferSelect;
 export type FitVerdictRow = typeof fitVerdicts.$inferSelect;
+
+export type PrepTranscriptRow = typeof prepTranscripts.$inferSelect;
+export type PrepEmailRow = typeof prepEmails.$inferSelect;
 
 export type PrepQuestionRow = typeof prepQuestions.$inferSelect;
 export type PrepCompanyRow = typeof prepCompany.$inferSelect;

@@ -46,8 +46,8 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
 │   └── <company-slug>/
 │       ├── context.md       ← DB dump: intel, loop, fit, JD, prep profile + Qs (refreshed by Research questions)
 │       ├── questions.md     ← online-research question bank the Research questions job writes (input #2)
-│       ├── transcripts/     ← call transcripts you paste (input #3)
-│       ├── emails.md        ← interviewing emails the interview-emails job writes (input #1)
+│       ├── transcripts/     ← DB dump: call transcripts the user pastes (input #3) — READ-ONLY
+│       ├── emails.md        ← DB dump: interviewing emails you capture (input #1) — READ-ONLY
 │       └── attachments/     ← role PDFs / prep guides / take-homes the interview-emails job downloads
 └── resume/
     ├── resume-ref.{docx,pdf}   ← BASE resume — the only source of truth for resume content
@@ -63,6 +63,13 @@ MCP job). When you open a **per-company prep chat**, read that company's `interv
 context.md` first — it's the single brief for prepping the user on that company (the real loop, comp,
 team, fit, JD, and the researched question set with sources). Notes added to a company's folder
 during a chat survive re-exports.
+
+**Knowledge lives in the DB; files are dumps.** `context.md`, `questions.md`, `emails.md`, and
+`transcripts/*.md` are all **generated from the app database** and overwritten on every refresh —
+read them freely, but **never write them**, because the next export throws your edit away. To change
+what they say, change the DB: submit an `interview-emails` result with `emails` records (below).
+The exception is `attachments/` and `resume/`, which are real files — artifacts, not knowledge — and
+the only things in this tree that exist nowhere else.
 
 **`interview-prep/GLOBAL/`** is the **cross-company readiness layer** — the opposite altitude from a
 per-company prep chat. When you open a **readiness chat**, follow `readiness.md` (below): read
@@ -181,14 +188,17 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   (JD fallback), and tag each fact + gap `recruiter` | `jd` | `online`. Submit ONE `interview-brief`
   record; each run appends a new version.
 - `interview-emails.md` — **capture** a company's interviewing emails (recruiter outreach, scheduling,
-  what-to-expect, comp) + file attachments into `interview-prep/<slug>/` (`emails.md` + `attachments/`),
-  **and report the structured interview loop** back to the app: per round — the `stage` it belongs to,
-  who you're meeting, the exact time/duration/zone, the format, the join link, what they said to expect,
-  their how-to-prepare list, and the `attachments` that round's thread carried. That lands on the
-  posting's rounds and drives the drawer's **stage** view (rounds sharing a `stage` name render as one
-  block, with its files linked), so it's readable in the app rather than only in a file. Queued by the
-  **Pull interview emails** button; searches ~3 months by company, writes the files, and downloads
-  attachments via `downloadGmailAttachments`.
+  what-to-expect, comp) and report **two** things in ONE `interview-emails` record:
+  **`emails`** — one entry **per email**, each with its `threadId`, `subject`, `from`, `date`, and the
+  message `body`. These become rows in the app's database (the app regenerates `emails.md` from them);
+  **do NOT write `emails.md` yourself** — anything you write there is overwritten.
+  **`rounds`** — the structured interview loop: per round, the `stage` it belongs to, who you're
+  meeting, the exact time/duration/zone, the format, the join link, what they said to expect, their
+  how-to-prepare list, and the `attachments` that round's thread carried. That lands on the posting's
+  rounds and drives the drawer's **stage** view (rounds sharing a `stage` name render as one block,
+  with its files linked). File attachments are still saved to `interview-prep/<slug>/attachments/`
+  via `downloadGmailAttachments` — those are artifacts, so they stay on disk. Queued by the
+  **Pull interview emails** button; searches ~3 months by company.
   It does NOT touch application **status** — global inbox-sync owns that.
   - The pipeline's Interviewing view also has a global **Update interview status** button that fans
     this out in one click: a global inbox-sync, then for EVERY interview/offer company it refreshes

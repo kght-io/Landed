@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { getCompanyProfile } from "@landed/backend/db/prep";
+import { emailsCapturedAt } from "@landed/backend/db/prep-assets";
 import { PREP_ROOT, prepContextDumpedAt } from "@landed/backend/prep/export-context";
 import { listTranscripts } from "@landed/backend/prep/transcripts";
 import { listAttachmentFiles } from "@landed/backend/prep/attachments";
@@ -9,13 +10,10 @@ import { postingPrepSlug } from "@landed/backend/prep/slug";
 
 export const dynamic = "force-dynamic";
 
-const mtime = (file: string): string | null => {
-  try { return fs.statSync(file).mtime.toISOString(); } catch { return null; }
-};
-
-// GET /api/applications/:id/prep-assets — the dumped-vs-missing status for the drawer's prep
+// GET /api/applications/:id/prep-assets — the captured-vs-missing status for the drawer's prep
 // materials panel: the three inputs (emails, questions, transcripts) + context.md, with timestamps
-// and counts. Everything read-only off disk + the prep profile.
+// and counts. Emails and transcripts come from the DB now (they used to be read off the files'
+// mtimes); attachments are still artifacts on disk, and context.md is still a dump.
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const slug = postingPrepSlug(id);
@@ -23,7 +21,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const profile = getCompanyProfile(slug);
   return Response.json({
     slug,
-    emails: { at: mtime(path.join(PREP_ROOT, slug, "emails.md")), attachments: listAttachmentFiles(slug) },
+    emails: { at: emailsCapturedAt(slug), attachments: listAttachmentFiles(slug) },
     questions: { researchedAt: profile?.researchedAt ?? null },
     transcripts: listTranscripts(slug),
     context: { at: prepContextDumpedAt(slug) },

@@ -1,8 +1,10 @@
 import path from "node:path";
 import fs from "node:fs";
 import { repoPath } from "../paths";
+import { ASSET_ROOT } from "../config";
 import Database from "better-sqlite3";
 import { addColumn } from "./add-column";
+import { backfillPrepAssets } from "./backfill-prep-assets";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import {
@@ -188,6 +190,36 @@ function connection() {
     );
     if (pcCols.size && !pcCols.has("overview")) addColumn(sqlite, `ALTER TABLE prep_company ADD COLUMN overview TEXT`);
   }
+  // The knowledge half of the interview-prep folder — pasted call transcripts and captured
+  // interview emails. Both used to live only as markdown on the user's disk; the DB is the source of
+  // truth now and those files are regenerated dumps. Keyed by the canonical company slug (the same
+  // key as prep_company.slug and the interview-prep/<slug>/ folder). See ./schema.ts.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS prep_transcripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    title TEXT,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS prep_transcripts_slug_name ON prep_transcripts(slug, name)");
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS prep_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    dedup_key TEXT NOT NULL,
+    thread_id TEXT,
+    message_id TEXT,
+    subject TEXT,
+    sender TEXT,
+    recipients TEXT,
+    sent_at TEXT,
+    round INTEGER,
+    attachments TEXT,
+    body TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'interview-emails',
+    captured_at TEXT NOT NULL
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS prep_emails_slug_key ON prep_emails(slug, dedup_key)");
   // Per-(company, round) prep feedback thread → dispatched to the agent as a prep-research refinement.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS prep_feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -387,12 +419,16 @@ function connection() {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_prep_attempts_question ON prep_attempts(question_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_prep_feedback_slug ON prep_feedback(slug)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_interviews_application ON interviews(application_id)");
+  // Prep knowledge is always read one company at a time; emails also join back to a Gmail thread.
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_prep_transcripts_slug ON prep_transcripts(slug)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_prep_emails_slug ON prep_emails(slug)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_prep_emails_thread ON prep_emails(thread_id)");
 
   // ── One-time data migrations (version-gated) ─────────────────────────────────────────────
   // Structural CREATE/ALTER above is idempotent and runs every boot; these rewrite *data*, so we
   // gate them on PRAGMA user_version to run once (not on every connection) and to make ordering
   // explicit. Each is also idempotent on its own — the gate is belt-and-suspenders.
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const userVersion = sqlite.pragma("user_version", { simple: true }) as number;
   if (userVersion < 1) {
     // v1: tier values renamed top_target/target/practice → tier1/tier2/tier3 (stable slugs).
@@ -430,7 +466,41 @@ function connection() {
         "AND json_extract(params, '$.postings[0].id') IS NULL",
     );
   }
+  // v3 is the prep-knowledge tables (prep_transcripts / prep_emails). Structural only — the
+  // CREATE TABLEs above do the whole job, and there is no data to rewrite, so this version has no
+  // block. The one-time import of what's already on disk is NOT gated here; see below for why.
   if (userVersion < SCHEMA_VERSION) sqlite.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+
+  // ── One-time import of the on-disk prep knowledge ────────────────────────────────────────
+  // Interview transcripts and captured emails moved out of the asset tree into the DB; this pulls
+  // in whatever is already on disk so nothing is stranded on the user's laptop. It never deletes
+  // the files it read — from here on those are regenerated dumps of these rows.
+  //
+  // Deliberately gated on app_config rather than PRAGMA user_version, unlike every migration above.
+  // Those rewrite data already IN the database, so "did it run?" and "did it work?" are the same
+  // question. This one reads an EXTERNAL folder that may be absent (a fresh clone), pointed
+  // somewhere else (ASSET_ROOT unset, so the default applies), or transiently unreadable (it is
+  // typically cloud-synced, which hands back EDEADLK) — so a boot can legitimately import nothing
+  // and still be a boot that must try again. Sharing the schema version would mark the import done
+  // on that boot and strand the files permanently, while holding the schema version BACK would
+  // block every later migration behind a folder that might never appear. It gets its own marker.
+  //
+  // Re-running is a no-op (INSERT OR IGNORE on the unique keys), so a retry costs nothing.
+  const BACKFILL_KEY = "prep_assets_backfilled_at";
+  const done = sqlite.prepare("SELECT value FROM app_config WHERE key = ?").get(BACKFILL_KEY);
+  if (!done) {
+    try {
+      const n = backfillPrepAssets(sqlite, path.join(ASSET_ROOT, "interview-prep"));
+      // Only call it finished once we've actually read a prep tree cleanly. `scanned` is false when
+      // the folder isn't there at all — the fresh-clone case, which simply retries on the next boot.
+      if (n.scanned && n.errors === 0) {
+        sqlite.prepare("INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)")
+          .run(BACKFILL_KEY, new Date().toISOString());
+      }
+    } catch {
+      /* never block boot on the asset folder — the next boot tries again */
+    }
+  }
 
   // ── Enum enforcement ─────────────────────────────────────────────────────────────────────
   // SQLite can't ALTER a table to ADD a CHECK constraint, so we enforce the enum sets with
@@ -483,4 +553,8 @@ function connection() {
 }
 
 export const db = drizzle(connection(), { schema });
+// The raw better-sqlite3 handle behind `db`. Drizzle is the query surface everywhere else; this is
+// for the migration path, which runs statements against tables Drizzle can't see yet (and for tests
+// that drive a migration directly). See ./backfill-prep-assets.ts.
+export const sqlite = connection();
 export { schema };

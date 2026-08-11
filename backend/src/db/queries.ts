@@ -21,7 +21,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString(); // full ISO — for company audit timestamps
 
 // Parse a JSON column that holds an array, tolerating null/garbage (agent-written data).
-function jsonArray<T>(raw: string | null): T[] | undefined {
+export function jsonArray<T>(raw: string | null): T[] | undefined {
   if (!raw) return undefined;
   try {
     const v = JSON.parse(raw);

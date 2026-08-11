@@ -11,15 +11,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import { eq, inArray } from "drizzle-orm";
-import { ASSET_ROOT } from "../config";
 import { db } from "../db";
 import { postings, companies, interviews } from "../db/schema";
 import { getCompanyProfile, listQuestions, companySlug, type CompanyProfile, type PrepQuestion } from "../db/prep";
-import type { InterviewRound, FitAssessment, Comment, EmailRefs } from "@landed/shared/types";
+import { listPrepEmails, listTranscriptRows } from "../db/prep-assets";
+import { exportTranscriptsFor } from "./transcripts";
+import { PREP_ROOT, writeFresh } from "./root";
+import type { InterviewRound, FitAssessment, Comment, EmailRefs, PrepEmail } from "@landed/shared/types";
 
-export const PREP_ROOT = path.join(ASSET_ROOT, "interview-prep");
+// Re-exported: this module was the home of PREP_ROOT before the dumps split out, and it's what the
+// routes, the chat, and the other prep helpers import.
+export { PREP_ROOT };
+
 const contextPath = (slug: string) => path.join(PREP_ROOT, slug, "context.md");
 const questionsPath = (slug: string) => path.join(PREP_ROOT, slug, "questions.md");
+const emailsPath = (slug: string) => path.join(PREP_ROOT, slug, "emails.md");
 
 // A prep chat is scoped to one company's folder. Resolve <PREP_ROOT>/<slug> safely — null if the
 // slug is empty or tries to escape the interview-prep tree (so a chat can never be pointed outside).
@@ -55,9 +61,18 @@ export function listPrepFiles(slug: string): PrepFile[] {
 // Make sure a company's prep .md files exist before a chat cwds into the folder to read them. Dumps
 // context.md / questions.md only when MISSING (the "Dump context" button force-refreshes from the
 // DB). Best-effort: a cloud-sync write hiccup must never block the chat from opening.
+//
+// The knowledge dumps (emails.md, transcripts/) are refreshed even when context.md is already
+// there — they only rewrite what changed, and they're the files the coach actually reads, so a chat
+// opening on a stale one would be reading knowledge the DB has already moved past. When context.md
+// IS being regenerated we let exportPrepContextFor do them, rather than writing every file twice.
 export function ensurePrepFiles(slug: string): void {
-  try { if (!prepContextDumpedAt(slug)) exportPrepContextFor(slug); } catch { /* best-effort */ }
+  const regenerating = !prepContextDumpedAt(slug);
+  try { if (regenerating) exportPrepContextFor(slug); } catch { /* best-effort */ }
   try { if (!questionsDumpedAt(slug)) exportQuestionsFor(slug); } catch { /* best-effort */ }
+  if (regenerating) return;
+  try { exportTranscriptsFor(slug); } catch { /* best-effort */ }
+  try { exportEmailsFor(slug); } catch { /* best-effort */ }
 }
 
 type Co = {
@@ -159,6 +174,56 @@ function emailManifestBlock(rows: Co[]): string {
   );
 }
 
+// The call transcripts stored for this company. An INDEX, not the text — the full transcripts are
+// dumped alongside in `transcripts/` and can run to thousands of lines, so context.md points at them
+// rather than swallowing them. Keeps the same section heading it had when they were only files.
+function transcriptsBlock(slug: string): string {
+  const list = listTranscriptRows(slug);
+  const head = `## Call transcripts`;
+  if (!list.length) {
+    return (
+      `${head}\nNone captured yet. Paste one from the app's Interview stage — it's stored in Landed and\n` +
+      `dumped into \`transcripts/\` in this folder, which the "Generate interview brief" job reads.`
+    );
+  }
+  const lines = list.map((t) => `- \`transcripts/${t.name}\` — ${t.title ?? "(untitled)"} · ${t.at.slice(0, 10)}`);
+  return `${head}\nFull text in \`transcripts/\` in this folder (dumped from Landed):\n${lines.join("\n")}`;
+}
+
+// The interview emails captured for this company — sender, date, subject, one per row, grouped by
+// Gmail thread. Also an index: the bodies are dumped to `emails.md` next to this file.
+function capturedEmailsBlock(slug: string): string {
+  const list = listPrepEmails(slug);
+  if (!list.length) return "";
+  // Group by thread, carrying the thread id on the GROUP rather than encoding it into the map key —
+  // mail with no thread id still needs a group, and sniffing that back out of a key string would
+  // make the output depend on a sentinel a reader has to know about.
+  const groups = new Map<string, { threadId?: string; mails: PrepEmail[] }>();
+  for (const e of list) {
+    const key = e.threadId ?? ` ${e.subject ?? ""}`;
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { threadId: e.threadId, mails: [] }));
+    g.mails.push(e);
+  }
+  const out = [
+    `## Captured emails (${list.length})`,
+    `Full text in \`emails.md\` in this folder (dumped from Landed):`,
+  ];
+  for (const g of groups.values()) {
+    out.push(`- **${g.mails[0].subject ?? "(no subject)"}**${g.threadId ? ` · \`${g.threadId}\`` : ""}`);
+    // A lone message with no headers to show would just repeat the line above it — that's what a
+    // row backfilled from the old prose blob looks like. Only break a thread out per message when
+    // the per-message lines actually say something the thread line didn't.
+    const [only] = g.mails;
+    if (g.mails.length === 1 && !only.from && !only.date && !only.round && !only.attachments?.length) continue;
+    for (const m of g.mails) {
+      const meta = [m.from, m.date?.slice(0, 10), m.round ? `round ${m.round}` : null].filter(Boolean).join(" · ");
+      out.push(`  - ${m.subject ?? "(no subject)"}${meta ? ` — ${meta}` : ""}${m.attachments?.length ? ` · 📎 ${m.attachments.join(", ")}` : ""}`);
+    }
+  }
+  return out.join("\n");
+}
+
 function buildContext(company: string, slug: string, rows: Co[], profile: CompanyProfile | null, questions: PrepQuestion[]): string {
   const today = new Date().toISOString().slice(0, 10);
   const lead = rows[0];
@@ -184,19 +249,24 @@ function buildContext(company: string, slug: string, rows: Co[], profile: Compan
   if (qs) out.push(`\n${qs}`);
   const jd = rows.map((r) => r.jd).find(Boolean);
   if (jd) out.push(`\n## Job description\n\n\`\`\`\n${jd}\n\`\`\``);
+  const captured = capturedEmailsBlock(slug);
+  if (captured) out.push(`\n${captured}`);
   const emails = emailManifestBlock(rows);
   if (emails) out.push(`\n${emails}`);
-  out.push(
-    `\n## Call transcripts`,
-    `Drop interview call transcripts into \`transcripts/\` in this folder (or paste them from the app's`,
-    `Interview stage). The "Generate interview brief" job reads every file there to ground the gaps.`,
-  );
+  out.push(`\n${transcriptsBlock(slug)}`);
   out.push(
     `\n---\n## How to use this in an agent chat`,
     `Open a Claude Code / the agent chat in this asset folder and start with something like:`,
     `> Read interview-prep/${slug}/context.md. You're my interview-prep coach for ${company}. Help me prep — quiz me, pressure-test answers, suggest variations, and dig into anything I'm weak on.`,
   );
   return out.join("\n") + "\n";
+}
+
+// The display name behind a canonical slug ("pendo" → "Pendo"), or null if no company matches. The
+// slug is the folder key, so a dump can resolve its own heading rather than depending on the caller
+// to pass one — two callers passing different things is how a file ends up flip-flopping its title.
+function companyNameFor(slug: string): string | null {
+  return db.select().from(companies).all().find((c) => companySlug(c.name) === slug)?.name ?? null;
 }
 
 // Map an interviews row → the InterviewRound shape, then sort by round number.
@@ -229,14 +299,52 @@ function gatherCompany(slug: string): { company: string; rows: Co[] } | null {
   return { company: rows[0].company, rows };
 }
 
-// Write (or refresh) one company's context.md. Returns the ISO timestamp it was written, or null if
-// the slug doesn't resolve to a company.
+// ── The knowledge dumps ───────────────────────────────────────────────────────────────────────
+// `emails.md` and `transcripts/*.md` are GENERATED from the DB, exactly like context.md — the rows
+// are the record and nothing reads these back. They exist so the interview-brief job and a
+// per-company prep chat keep working off a folder of markdown, as they always have.
+// (The transcripts half lives with its writer, in ./transcripts.ts.)
+
+// Regenerate `emails.md` from the stored emails — one section per message, chronological, with the
+// headers that made per-row storage worth doing. A row imported from the pre-migration prose blob
+// (source `backfill`, so no sender/date/thread) is emitted verbatim under its own heading, which is
+// what keeps a company captured before the migration reading the same as it did before.
+export function exportEmailsFor(slug: string): { at: string } | null {
+  const list = listPrepEmails(slug);
+  if (!list.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const out: string[] = [
+    `# ${companyNameFor(slug) ?? slug} — interview emails`,
+    `_Generated ${today} from Landed — regenerated from the database, so edits here are overwritten._`,
+  ];
+  for (const e of list) {
+    const bare = !e.from && !e.date && !e.threadId; // a backfilled prose blob — it carries its own headings
+    if (bare) { out.push(`\n---\n`, e.body.trimEnd()); continue; }
+    const meta = [
+      e.from ? `**From:** ${e.from}` : null,
+      e.date ? `**Date:** ${e.date}` : null,
+      e.threadId ? `**Thread:** \`${e.threadId}\`` : null,
+      e.round ? `**Round:** ${e.round}` : null,
+      e.attachments?.length ? `**Attachments:** ${e.attachments.join(", ")}` : null,
+    ].filter(Boolean).join(" · ");
+    out.push(`\n---\n`, `## ${e.subject ?? "(no subject)"}`, meta, ``, e.body.trimEnd());
+  }
+  writeFresh(emailsPath(slug), out.join("\n") + "\n");
+  return { at: new Date().toISOString() };
+}
+
+// Write (or refresh) one company's context.md — and the knowledge dumps it indexes, so the folder is
+// never half-regenerated. Returns the ISO timestamp it was written, or null if the slug doesn't
+// resolve to a company.
 export function exportPrepContextFor(slug: string): { at: string } | null {
   const g = gatherCompany(slug);
   if (!g) return null;
   const profile = getCompanyProfile(slug);
   const questions = profile ? listQuestions({ company: slug }) : [];
-  fs.mkdirSync(path.join(PREP_ROOT, slug, "transcripts"), { recursive: true });
+  // Best-effort: a cloud-sync write hiccup on one dump must not cost us the context file.
+  try { exportTranscriptsFor(slug); } catch { /* dump is best-effort */ }
+  try { exportEmailsFor(slug); } catch { /* dump is best-effort */ }
+  fs.mkdirSync(path.dirname(contextPath(slug)), { recursive: true });
   fs.writeFileSync(contextPath(slug), buildContext(g.company, slug, g.rows, profile, questions));
   return { at: new Date().toISOString() };
 }

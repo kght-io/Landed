@@ -1,5 +1,5 @@
 import type { EmailRefs, InterviewKind, Interviewer, InterviewRound, Status } from "../../types";
-import { str, warningLog } from "../../util/coerce";
+import { str, strList, warningLog } from "../../util/coerce";
 import type { CoerceWarning, WarningLog } from "../../util/coerce";
 import type { IncomingApp } from "../types";
 
@@ -53,14 +53,6 @@ function toStartTime(v: unknown): string | undefined {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
-// Loose JSON → a list of trimmed strings (their how-to-prepare bullets). A single string is
-// accepted as a one-item list; empties drop out.
-function toStrList(v: unknown): string[] | undefined {
-  const arr = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
-  const out = arr.map((x) => str(x)).filter((x): x is string => !!x);
-  return out.length ? out : undefined;
-}
-
 // Loose JSON → interviewers. Accepts [{name,title}] or bare strings ("Zain Lakhani — Chief AI
 // Officer"), splitting the common "name — title" / "name (title)" shapes.
 function toInterviewers(v: unknown): Interviewer[] | undefined {
@@ -107,8 +99,8 @@ export function incomingRounds(raw: unknown, log?: WarningLog, subject?: string)
         format: str(o.format),
         joinUrl: str(o.joinUrl) ?? str(o.zoomUrl) ?? str(o.meetingUrl),
         whatToExpect: str(o.whatToExpect) ?? str(o.expect) ?? str(o.description),
-        prepNotes: toStrList(o.prepNotes ?? o.howToPrepare ?? o.prep),
-        attachments: toStrList(o.attachments ?? o.files),
+        prepNotes: strList(o.prepNotes ?? o.howToPrepare ?? o.prep),
+        attachments: strList(o.attachments ?? o.files),
       };
     })
     // Drop fully-empty entries — but a round is real if it carries ANY of the new detail too.

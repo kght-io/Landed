@@ -149,6 +149,28 @@ export type InterviewRound = {
 // tracker can deep-link straight to the message instead of a search.
 export type EmailRefs = { applied?: string; rejected?: string; offer?: string; interview?: string };
 
+// ── Prep knowledge (rows, not files) ──
+// One captured interview email, and one pasted call transcript. Both used to live only as markdown
+// under <ASSET_ROOT>/interview-prep/<slug>/ — knowledge a hosted backend can't see. They are DB rows
+// now; the files under that folder are regenerated DUMPS of these rows (like context.md), so nothing
+// reads them back. Keyed by the canonical company slug (companySlug), NOT a posting id: a company's
+// mail and calls span every role you've talked to them about.
+export type PrepEmail = {
+  threadId?: string; // Gmail thread id — joins postings.emailRefs / interviews.emailId
+  messageId?: string; // Gmail message id, when known — the natural dedup key
+  subject?: string;
+  from?: string; // "Steve Cosme <stephen@acme.com>" — as the header stated it
+  to?: string[];
+  date?: string; // when it was sent (ISO, or as stated) — the sort key
+  round?: number; // the loop round this mail is about, when it's clearly about one
+  attachments?: string[]; // filenames saved under interview-prep/<slug>/attachments/
+  body: string; // the message text — the part chat actually needs
+};
+
+// A pasted interview call transcript. `name` is the export filename (transcript-N.md) and the
+// per-company unique key; `title` becomes the H1 in the dump so rounds are tellable apart.
+export type PrepTranscript = { name: string; title?: string; body: string; at: string };
+
 // A personal comment You leaves on a posting (distinct from `note`, which is shared with
 // The agent/historical sync). Stored as a JSON array on the posting; the funnel shows a count + popover.
 export type Comment = { text: string; at: string; editedAt?: string }; // at = created, editedAt = last edit (ISO timestamps)

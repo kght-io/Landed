@@ -11,8 +11,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   return Response.json({ slug, transcripts: listTranscripts(slug) });
 }
 
-// POST /api/applications/:id/transcript — write a pasted transcript into interview-prep/<slug>/
-// transcripts/ as a fresh numbered file (the app can't record calls). Body: { body, title? }.
+// POST /api/applications/:id/transcript — store a pasted transcript for this company (the app can't
+// record calls). Body: { body, title? }. The row is the record; the numbered file under
+// interview-prep/<slug>/transcripts/ is re-dumped from it for the brief job and the prep chat.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const slug = postingPrepSlug(id);

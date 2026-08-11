@@ -139,26 +139,26 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
   "interview-emails": {
     type: "interview-emails",
     title: "Pull interview emails",
-    description: "Capture a company's interview emails (recruiter outreach, scheduling, what-to-expect, comp) + attachments into its interview-prep folder, and report the structured interview loop (who · when · format · what to expect) onto the posting. Does NOT touch application status (global inbox-sync owns that).",
+    description: "Capture a company's interview emails (recruiter outreach, scheduling, what-to-expect, comp) as one record per email, download their attachments, and report the structured interview loop (who · when · format · what to expect) onto the posting. Does NOT touch application status (global inbox-sync owns that).",
     playbook: "interview-emails.md",
-    // Owns the round's SUBSTANCE. See ingestInterviewLoop.
+    // Owns the round's SUBSTANCE + the captured mail. See ingestInterviewLoop.
     buildTask: (p) => {
       const slug = p?.slug ?? "<slug>";
       const co = p?.company ?? "the company";
       const since = p?.since ? ` after:${p.since}` : " newer_than:3m";
       const id = p?.id ?? "<posting id>";
       return (
-        `Capture the interviewing emails for ${co} into \`interview-prep/${slug}/\`. searchGmail with a query like ` +
-        `\`"${co}"${since}\` (also try the recruiter's domain), read the interviewing-relevant threads via getGmailThread, ` +
-        `and WRITE \`interview-prep/${slug}/emails.md\` structured for prep — per round/interviewer: who (name·title·` +
-        `LinkedIn from the signature), the format / what-to-expect they described, prep or take-home links, logistics/dates, ` +
-        `and any comp figures. For every thread that carries a file (role PDF, prep guide, take-home), call ` +
-        `downloadGmailAttachments(id, "${slug}") to save it into attachments/. THEN report the loop itself: submit ONE ` +
-        `record via submitJobResult(type:"interview-emails") shaped { id: ${id}, rounds: [...] } — one entry per round, ` +
-        `chronological, with round, kind, date, startTime, durationMins, timezone, format, joinUrl, interviewers ` +
-        `[{name,title}], whatToExpect (prose — what they said the round IS), and prepNotes (their how-to-prepare list). ` +
-        `Omit any field you didn't verify; omitted fields keep what's stored. Do NOT change application status ` +
-        `(global inbox-sync owns that). Follow interview-emails.md.`
+        `Capture the interviewing emails for ${co}. searchGmail with a query like \`"${co}"${since}\` (also try the ` +
+        `recruiter's domain) and read the interviewing-relevant threads via getGmailThread. For every thread that ` +
+        `carries a file (role PDF, prep guide, take-home), call downloadGmailAttachments(id, "${slug}") to save it into ` +
+        `\`interview-prep/${slug}/attachments/\`. Then submit ONE record via submitJobResult(type:"interview-emails") shaped ` +
+        `{ id: ${id}, emails: [...], rounds: [...] }. \`emails\`: ONE entry per email (not per thread) with threadId, ` +
+        `messageId, subject, from, to, date, round (when it's about one), attachments, and body — the message text kept ` +
+        `substantially verbatim, signatures and quoted replies trimmed, NOT summarized. Do NOT write emails.md: the app ` +
+        `regenerates it from these records. \`rounds\`: one entry per round, chronological, with round, stage, kind, date, ` +
+        `startTime, durationMins, timezone, format, joinUrl, interviewers [{name,title}], whatToExpect (prose — what they ` +
+        `said the round IS), and prepNotes (their how-to-prepare list). Omit any field you didn't verify; omitted fields ` +
+        `keep what's stored. Do NOT change application status (global inbox-sync owns that). Follow interview-emails.md.`
       );
     },
     ingest: ingestInterviewLoop,

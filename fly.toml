@@ -7,7 +7,7 @@
 # Created with `fly apps create landed` + this file — deliberately NOT `fly launch`, which
 # generates its own Dockerfile over the hand-tuned one and allocates public IPs.
 
-app = "landed-ulvakw"
+app = "landed-ai"
 # us-east. The volume MUST be created in this same region — one in another region won't attach.
 primary_region = "iad"
 

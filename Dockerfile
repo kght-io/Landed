@@ -46,9 +46,12 @@ RUN apt-get update \
       "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${TARGETARCH}.tar.gz" \
  && tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz litestream \
  && rm /tmp/litestream.tar.gz \
+ && wget -qO /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH}" \
+ && chmod +x /usr/local/bin/cloudflared \
  && apt-get purge -y wget && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/* \
- && litestream version
+ && litestream version && cloudflared --version
 # paths.ts walks up from cwd for the workspace-root package.json; set it explicitly so nothing
 # depends on which directory the process happens to start in.
 ENV REPO_ROOT=/app

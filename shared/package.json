@@ -5,6 +5,7 @@
   "description": "Client-safe code: domain types, pure logic, and formatting shared by the UI and the server. Must never import node builtins, a DB driver, or @landed/backend.",
   "exports": {
     "./config/targets.mjs": "./src/config/targets.mjs",
+    "./mcp/tool-schemas.mjs": "./src/mcp/tool-schemas.mjs",
     "./*": "./src/*.ts"
   }
 }

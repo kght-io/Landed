@@ -1,8 +1,9 @@
-// Read the jobhunt MCP server's tool catalog (name / description / input schema) for the in-app
-// /mcp reference, straight from the server module so the docs never drift from the real tools.
-// The server only starts its stdio loop when launched directly (see jobhunt-server.mjs), so
-// importing it here is side-effect-free — we just read the exported TOOLS metadata.
-import { TOOLS, SERVER } from "@landed/mcp/jobhunt-server.mjs";
+// Read the jobhunt tool catalog (name / description / input schema) for the in-app /mcp reference,
+// straight from the shared tool contract so the docs never drift from the real tools. That contract
+// is what the stdio MCP server advertises AND what a direct-API chat layer would send as
+// `tools: [...]`, so this page documents both. Schemas only — the HTTP runners live with the MCP
+// server, which this module deliberately does not import.
+import { TOOL_SCHEMAS, MCP_SERVER } from "@landed/shared/mcp/tool-schemas.mjs";
 
 export type McpCategory = "read" | "scan" | "queue" | "write";
 export type McpParam = { name: string; type: string; description?: string; required: boolean };
@@ -23,7 +24,7 @@ function categoryOf(name: string): McpCategory {
 
 // The catalog, each flattened to a doc-friendly shape + categorized.
 export function listMcpTools(): { server: { name: string; version: string }; tools: McpToolDoc[] } {
-  const tools: McpToolDoc[] = (TOOLS as unknown as RawTool[]).map((t) => {
+  const tools: McpToolDoc[] = (TOOL_SCHEMAS as unknown as RawTool[]).map((t) => {
     const props = t.inputSchema?.properties ?? {};
     const required = new Set(t.inputSchema?.required ?? []);
     const params: McpParam[] = Object.entries(props).map(([name, s]) => ({
@@ -35,5 +36,5 @@ export function listMcpTools(): { server: { name: string; version: string }; too
     const category = categoryOf(t.name);
     return { name: t.name, description: t.description ?? "", params, category, readOnly: category === "read" };
   });
-  return { server: SERVER as { name: string; version: string }, tools };
+  return { server: MCP_SERVER as { name: string; version: string }, tools };
 }

@@ -8,5 +8,8 @@
   },
   "exports": {
     "./jobhunt-server.mjs": "./jobhunt-server.mjs"
+  },
+  "dependencies": {
+    "@landed/shared": "*"
   }
 }

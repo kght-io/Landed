@@ -60,7 +60,8 @@ it.
 | `backend/jobs/sweep.ts` | The self-heal tick every reader and claimer runs first | |
 | `backend/jobs/subscribe.ts` | Where the jobs layer reacts to db-level events | See `db/stage-change.ts` |
 | `backend/agents/` | CLI config, run journals, and `reconcile` (the DB-write funnel) | |
-| `mcp/jobhunt-server.mjs` | 23 tools — CoWork's entire API surface | Zero-dependency, hand-rolled JSON-RPC |
+| `shared/mcp/tool-schemas.mjs` | The tool contract — 23 tools, CoWork's entire API surface | Plain `.mjs` so the zero-dep MCP server can import it; a direct-API chat layer sends the same schemas |
+| `mcp/jobhunt-server.mjs` | The stdio transport + one HTTP runner per tool | Zero-dependency, hand-rolled JSON-RPC |
 | `instructions/` | The playbooks: CoWork's behaviour, in markdown, in git | Consumed by a live agent — keep in sync |
 | `shared/` | Types, personas, coercion, formatting, the lease rule | Zero deps, browser-safe by contract |
 

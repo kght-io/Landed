@@ -26,6 +26,15 @@ function connection() {
   const sqlite = new Database(DB_PATH);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
+  // better-sqlite3 defaults this to 5s, which is shorter than this bootstrap takes when several
+  // processes run it at once — and they do. `next build` collects page data in PARALLEL workers,
+  // each importing a route, each importing this module, each running every CREATE/ALTER below plus
+  // the full enum-trigger rebuild. The losers waited out 5s and killed the production build
+  // ("database is locked" on /api/agents/run, then /api/agents/live). Litestream now adds a second
+  // source of contention, holding read locks while it replicates the WAL.
+  // The work is idempotent, so waiting is always the right answer — the only question is how long,
+  // and outlasting one full bootstrap is the bar.
+  sqlite.pragma("busy_timeout = 30000");
   // Fold the WAL into the main .db file frequently so the file stays current —
   // otherwise a plain cp backup captures a stale snapshot (learned the hard way).
   sqlite.pragma("wal_autocheckpoint = 100");

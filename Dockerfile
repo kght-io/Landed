@@ -34,6 +34,21 @@ FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+
+# Litestream — continuous replication of the SQLite file to R2. See litestream.yml for why the Fly
+# volume alone is not a backup. TARGETARCH is set by the builder, so this pulls the binary matching
+# whatever architecture the image is actually being built for rather than assuming amd64.
+ARG LITESTREAM_VERSION=0.3.13
+ARG TARGETARCH
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates wget \
+ && wget -qO /tmp/litestream.tar.gz \
+      "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${TARGETARCH}.tar.gz" \
+ && tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz litestream \
+ && rm /tmp/litestream.tar.gz \
+ && apt-get purge -y wget && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* \
+ && litestream version
 # paths.ts walks up from cwd for the workspace-root package.json; set it explicitly so nothing
 # depends on which directory the process happens to start in.
 ENV REPO_ROOT=/app
@@ -56,6 +71,12 @@ RUN mkdir -p /app/data /app/asset-root && chown -R node:node /app/data /app/asse
 VOLUME ["/app/data", "/app/asset-root"]
 ENV ASSET_ROOT=/app/asset-root
 
+# Litestream's config and the entrypoint that uses it. Both are image content, not volume content —
+# they must survive a wiped volume, since restoring one is the whole point.
+COPY litestream.yml /etc/litestream.yml
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 USER node
 EXPOSE 3000
 # /api/health, not a data route: it answers "is the schema there and queryable" and nothing else, so
@@ -64,4 +85,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["npm", "start"]
+# Litestream becomes the parent and runs `npm start` as its child — see scripts/docker-entrypoint.sh.
+# Falls back to running the app unreplicated when no R2 credentials are present.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

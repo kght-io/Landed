@@ -1,0 +1,39 @@
+# Continuous replication of the SQLite database to Cloudflare R2.
+#
+# The Fly volume is ONE disk holding the ONLY copy of the cloud database. Fly's volume snapshots are
+# daily with 5-day retention and live on Fly's own infrastructure — the same failure domain as the
+# thing they protect. Litestream ships the write-ahead log to R2 as it is written (~1s behind), so a
+# dead machine costs about a second of work instead of everything.
+#
+# R2 rather than S3 because egress is free: pulling your own backup back out costs nothing, which is
+# the difference between a restore you'll actually run and one you'll hesitate over.
+#
+# THIS IS NOT PROTECTION AGAINST YOURSELF. Replication is faithful — a bad migration or an agent
+# deleting 200 postings is copied to R2 within the second. Point-in-time restore is the answer to
+# that, and it only works inside the retention window. See scripts/restore-test.sh.
+#
+# Credentials come from the environment (fly secrets), never this file — it is tracked in a PUBLIC
+# repo.
+
+dbs:
+  - path: /app/data/jobhunt.db
+    replicas:
+      - name: r2
+        type: s3
+        # R2's S3-compatible endpoint. LITESTREAM_R2_ENDPOINT is the full
+        # https://<account-id>.r2.cloudflarestorage.com URL, set as a Fly secret.
+        endpoint: ${LITESTREAM_R2_ENDPOINT}
+        bucket: ${LITESTREAM_R2_BUCKET}
+        path: jobhunt
+        # R2 has no regions, but the S3 client requires the field. "auto" is what Cloudflare expects.
+        region: auto
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        # How long point-in-time restore reaches back. This is the window in which you can undo a
+        # mistake you made yourself, so it is the number that matters most after disk failure.
+        retention: 720h # 30 days
+        # Take a full snapshot daily so a restore replays at most a day of WAL frames.
+        snapshot-interval: 24h
+        # Fail loudly rather than drift silently: a replica that stops updating while the app keeps
+        # serving is the classic way a backup turns out to be imaginary months later.
+        sync-interval: 1s

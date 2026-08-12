@@ -1,0 +1,58 @@
+# Landed on Fly.io — ONE machine, ONE volume.
+#
+# That shape is a hard requirement, not a starting point: `data/jobhunt.db` is SQLite (single
+# writer). A second machine is not "more capacity", it is two processes writing one file through
+# two different disks. Never `fly scale count` above 1. See the Dockerfile header for the rest.
+#
+# Created with `fly apps create landed` + this file — deliberately NOT `fly launch`, which
+# generates its own Dockerfile over the hand-tuned one and allocates public IPs.
+
+app = "landed-ulvakw"
+# us-east. The volume MUST be created in this same region — one in another region won't attach.
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  # paths.ts walks up from cwd to find the workspace root; pin it so nothing depends on which
+  # directory the process started in (npm runs workspace scripts with cwd = the package).
+  REPO_ROOT = "/app"
+  # Not a mounted volume — under BYO-Claude-Code the .docx artifacts are written on the user's own
+  # machine. This path exists in the image so writes don't crash; it is ephemeral by design.
+  ASSET_ROOT = "/app/asset-root"
+  PORT = "3000"
+
+# The only durable state. Fly mounts an EMPTY volume here on first boot (unlike a compose named
+# volume, which copies image contents in), so the schema bootstrap in backend/src/db/index.ts runs
+# against a genuinely fresh database — the path scripts/smoke.mjs exercises in CI.
+[[mounts]]
+  source = "landed_data"
+  destination = "/app/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Both false, and min 1. The queue's /api/jobs/wait long-polls for 25s and /api/agents/live holds
+  # SSE far longer; a machine that suspends under an idle-looking connection breaks both. This app
+  # is always-on, never scale-to-zero.
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  # Fly runs its own checks and ignores the Dockerfile's HEALTHCHECK, so it has to be declared here
+  # too. Same endpoint, same meaning: 503 while the schema isn't queryable.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  # Cheap insurance on a small machine: `next build` is gone by runtime, but a burst during ingest
+  # shouldn't OOM-kill the only instance.
+  swap_size_mb = 512

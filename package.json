@@ -30,6 +30,7 @@
     "tailor:docx": "node --import tsx scripts/tailor-docx.ts",
     "levels:scrape": "node scripts/levels-scrape.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
+    "smoke": "node scripts/smoke.mjs",
     "check": "npm run typecheck && npm run boundary && npm test",
     "prepare": "git config core.hooksPath .githooks || true"
   },

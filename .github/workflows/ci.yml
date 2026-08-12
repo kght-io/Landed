@@ -23,6 +23,25 @@ jobs:
       - run: npm ci
       - run: npm run check
 
+  build:
+    name: production build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # `tsc --noEmit` in `check` does NOT cover this: a Next production build fails on things the
+      # typechecker passes — server/client boundary violations, static analysis, bundling. Prod ran
+      # `next dev` for months, so nothing was exercising the production build at all.
+      - run: npm run build
+      # …and a build that succeeds still isn't a build that boots. The smoke test starts the built
+      # server against an empty temp DB and asserts it bootstraps its own schema and serves a route —
+      # the fresh-volume path, which is exactly how a first cloud deploy comes up.
+      - run: npm run smoke
+
   lint:
     name: lint
     runs-on: ubuntu-latest

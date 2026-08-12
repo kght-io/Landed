@@ -58,8 +58,10 @@ ENV ASSET_ROOT=/app/asset-root
 
 USER node
 EXPOSE 3000
-# Fails while the DB is unreachable, which is the failure that actually matters here.
+# /api/health, not a data route: it answers "is the schema there and queryable" and nothing else, so
+# a probe running every 30s forever can't fail for reasons unrelated to liveness. It returns 503 when
+# unhealthy, which is what `r.ok` reads. See backend/src/db/health.ts.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/jobs').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["npm", "start"]

@@ -76,7 +76,7 @@ export default function Agents() {
               <div
                 key={t.type}
                 onClick={() => setPane({ kind: "agent", type: t.type })}
-                className={`cursor-pointer rounded-xl border p-2.5 transition ${
+                className={`cursor-pointer rounded-xl border px-2.5 py-2 transition ${
                   active ? "border-zinc-700 bg-zinc-900/70" : "border-transparent hover:bg-zinc-900/40"
                 }`}
               >
@@ -93,38 +93,43 @@ export default function Agents() {
                     </span>
                   )}
                 </div>
-                <p className="mt-0.5 truncate text-[11.5px] text-zinc-500">{t.title}</p>
 
-                {/* The card header's controls, stacked. Present for every agent rather than only the
-                    expanded one — seeing that three are paused is the point of a rail. */}
-                <div className="mt-2 flex items-center gap-2">
+                {/* The meter stays on every row: context pressure is the one number that predicts a
+                    run degrading, and it is worth seeing without clicking in. */}
+                <div className="mt-1.5 flex items-center gap-2 pl-4">
                   <ContextMeter tokens={chat.contextTokens} model={chat.model} />
-                  <span className="flex-1" />
-                  <AutoDrainToggle on={chat.autoDrain !== false} onChange={(v) => setAutoDrain(t.type, v)} />
                 </div>
 
-                <div
-                  className="mt-1.5 flex items-center gap-1"
-                  onClick={(e) => e.stopPropagation()} // a control click is not a selection
-                >
-                  <WorkQueueButton type={t.type} />
-                  <span className="flex-1" />
-                  <button
-                    onClick={() => clear(t.type)}
-                    disabled={chat.running || (!chat.sessionId && chat.entries.length === 0)}
-                    title="Clear this agent's transcript and reset its session"
-                    className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-rose-300 disabled:opacity-30"
+                {/* Everything else appears only on the SELECTED agent. Five copies of six controls
+                    is thirty controls competing for a 300px column, and you can only act on one
+                    agent at a time anyway — so the rail shows state for all and offers actions for
+                    the one in front of you. It doubles as the selection cue, which a border alone
+                    was carrying. */}
+                {active && (
+                  <div
+                    className="mt-2 flex items-center gap-1 pl-4"
+                    onClick={(e) => e.stopPropagation()} // a control click is not a re-selection
                   >
-                    <Eraser size={13} />
-                  </button>
-                  <button
-                    onClick={() => setPlaybook({ title: personaFor(t.type), path: t.playbook })}
-                    title="Instructions (this agent's playbook)"
-                    className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
-                  >
-                    <BookOpen size={13} />
-                  </button>
-                </div>
+                    <WorkQueueButton type={t.type} />
+                    <span className="flex-1" />
+                    <AutoDrainToggle on={chat.autoDrain !== false} onChange={(v) => setAutoDrain(t.type, v)} />
+                    <button
+                      onClick={() => clear(t.type)}
+                      disabled={chat.running || (!chat.sessionId && chat.entries.length === 0)}
+                      title="Clear this agent's transcript and reset its session"
+                      className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-rose-300 disabled:opacity-30"
+                    >
+                      <Eraser size={13} />
+                    </button>
+                    <button
+                      onClick={() => setPlaybook({ title: personaFor(t.type), path: t.playbook })}
+                      title="Instructions (this agent's playbook)"
+                      className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                    >
+                      <BookOpen size={13} />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

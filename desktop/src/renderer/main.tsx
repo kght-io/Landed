@@ -20,7 +20,8 @@ import AgentChatsProvider from "./providers/AgentChatsProvider";
 import AgentQueueProvider from "@/components/AgentQueueProvider";
 import AgentsView from "@/components/AgentsView";
 import Files from "./Files";
-import { useState } from "react";
+import { AUTO_WORK_KEY } from "@/components/AutoWorkController";
+import { useEffect, useState } from "react";
 
 // Relative /api calls go through main, which has no CORS to satisfy and already holds the Access
 // token. Installed before anything renders so no component can race it.
@@ -38,8 +39,53 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   });
 }) as typeof window.fetch;
 
+/**
+ * Make the ported page's Auto-work toggle mean something here.
+ *
+ * On the web it says "let the browser start agents on its own". On this machine it has to mean
+ * something stronger — "let this app run agents at all" — because this process is the one that works
+ * while nobody is watching. The toggle itself is the web component's, storing a boolean in
+ * localStorage; this bridges that to the supervisor so flipping it actually stops the drain.
+ *
+ * Seeded from the supervisor rather than from localStorage, so a pause set before a restart shows
+ * as paused instead of the switch and the behaviour disagreeing.
+ */
+function useAutoWorkBridge() {
+  useEffect(() => {
+    const read = () => {
+      try {
+        return localStorage.getItem(AUTO_WORK_KEY) !== "false";
+      } catch {
+        return true;
+      }
+    };
+
+    void window.landed.drainEnabled().then((on) => {
+      try {
+        localStorage.setItem(AUTO_WORK_KEY, JSON.stringify(on));
+      } catch {
+        /* quota — the toggle just shows its default */
+      }
+      // usePersistentState reads through a cache keyed on the raw string, so it needs telling.
+      window.dispatchEvent(new CustomEvent("landed:persistent-state", { detail: AUTO_WORK_KEY }));
+    });
+
+    const onChange = (e: Event) => {
+      if (e instanceof StorageEvent ? e.key !== AUTO_WORK_KEY : (e as CustomEvent).detail !== AUTO_WORK_KEY) return;
+      void window.landed.setDrainEnabled(read());
+    };
+    window.addEventListener("landed:persistent-state", onChange);
+    window.addEventListener("storage", onChange);
+    return () => {
+      window.removeEventListener("landed:persistent-state", onChange);
+      window.removeEventListener("storage", onChange);
+    };
+  }, []);
+}
+
 function App() {
   const [view, setView] = useState<"agent" | "files">("agent");
+  useAutoWorkBridge();
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-200">
       {/* The window is titleBarStyle: "hiddenInset", so macOS draws its traffic lights OVER the top

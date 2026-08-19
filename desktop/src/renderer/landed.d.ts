@@ -22,6 +22,8 @@ declare global {
       agentStart(type: string): Promise<void>;
       agentStop(type: string): Promise<void>;
       agentClear(type: string): Promise<void>;
+      drainEnabled(): Promise<boolean>;
+      setDrainEnabled(on: boolean): Promise<void>;
 
       apiFetch(
         path: string,

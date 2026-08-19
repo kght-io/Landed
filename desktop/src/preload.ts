@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("landed", {
   agentStart: (type: string) => ipcRenderer.invoke("agent:start", type),
   agentStop: (type: string) => ipcRenderer.invoke("agent:stop", type),
   agentClear: (type: string) => ipcRenderer.invoke("agent:clear", type),
+  drainEnabled: () => ipcRenderer.invoke("supervisor:enabled"),
+  setDrainEnabled: (on: boolean) => ipcRenderer.invoke("supervisor:setEnabled", on),
 
   // Proxy for the reused web components' relative /api calls — see main.ts for why they cannot go
   // out from a file:// origin directly.

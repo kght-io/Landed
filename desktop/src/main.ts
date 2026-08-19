@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { APP_ORIGIN, ensureAssetRoot, getAssetRoot } from "./config";
+import { APP_ORIGIN, drainEnabled, ensureAssetRoot, getAssetRoot, setDrainEnabled } from "./config";
 import { listDir, resolveWithin } from "./browse";
 import { parseDeepLink } from "./deeplink";
 import { revealAssetFolder, revealPrepFolder, revealResumeFolder } from "./local-ops";
@@ -90,7 +90,9 @@ function refreshTray(): void {
   if (!tray) return;
   const status = loop?.status();
   const running = status?.running ?? [];
-  const label = status?.stopped
+  const label = !drainEnabled()
+    ? "Paused"
+    : status?.stopped || !loop
     ? "Not draining"
     : running.length > 0
       ? `Running: ${running.join(", ")}`
@@ -99,6 +101,20 @@ function refreshTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label, enabled: false },
+      { type: "separator" },
+      {
+        label: drainEnabled() ? "Pause draining" : "Resume draining",
+        click: () => {
+          const next = !drainEnabled();
+          setDrainEnabled(next);
+          if (next) startLoop();
+          else {
+            loop?.stop();
+            for (const type of children.keys()) killRun(type);
+          }
+          refreshTray();
+        },
+      },
       { type: "separator" },
       { label: "Open Landed", click: () => void shell.openExternal(APP_ORIGIN) },
       { label: "Show folder", click: () => revealAssetFolder() },
@@ -245,6 +261,22 @@ app.whenReady().then(async () => {
     }).catch(() => undefined);
   });
   ipcMain.handle("agent:stop", (_e, type: string) => killRun(type));
+
+  // THE PAUSE. The web app's Auto-work toggle means "let the browser start agents on its own"; here
+  // it means "let this machine run them at all", which is the stronger promise — this process is the
+  // one that works while nobody is watching. Off stops the loop AND kills anything mid-flight, since
+  // a pause that lets the current job finish is not what someone reaching for it wants.
+  ipcMain.handle("supervisor:enabled", () => drainEnabled());
+  ipcMain.handle("supervisor:setEnabled", (_e, on: boolean) => {
+    setDrainEnabled(on);
+    if (on) {
+      if (!loop || loop.status().stopped) startLoop();
+    } else {
+      loop?.stop();
+      for (const type of children.keys()) killRun(type);
+    }
+    refreshTray();
+  });
   ipcMain.handle("agent:clear", (_e, type: string) => {
     transcripts.delete(type);
   });
@@ -299,10 +331,28 @@ app.whenReady().then(async () => {
   const icon = nativeImage.createFromPath(path.join(__dirname, "assets", "trayTemplate.png"));
   icon.setTemplateImage(true);
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+
   tray.on("click", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
     else focusWindow();
   });
+  if (drainEnabled()) startLoop();
+  refreshTray();
+  setInterval(refreshTray, 2000);
+
+  const cold = pendingLink ?? linkInArgv(process.argv);
+  pendingLink = null;
+  if (cold) runDeepLink(cold);
+
+  createWindow();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+// Stopping a loop is terminal (its long-polls are aborted), so resuming means building a new one.
+// Kept in a function for that reason rather than inlined at startup.
+function startLoop(): void {
   loop = createDrainLoop({
     types: DRAIN_TYPES,
     poll: pollForWork,
@@ -318,25 +368,8 @@ app.whenReady().then(async () => {
       lastError = String(e);
     },
   });
-  refreshTray();
-  setInterval(refreshTray, 2000);
-
-  // light-dark() re-resolves on its own inside the page; the window's own backgroundColor does not,
-  // so it has to be told when the user flips appearance.
-  // Not awaited: the loop runs for the life of the app.
-  void loop.start();
-
-  createWindow();
-
-  // Drain anything that arrived before there was a root — including the link that launched us.
-  const cold = pendingLink ?? linkInArgv(process.argv);
-  pendingLink = null;
-  if (cold) runDeepLink(cold);
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+  void loop.start(); // not awaited: it runs for the life of the app, or until paused
+}
 
 // Closing the window does NOT stop draining — that is the whole point of a background supervisor.
 // The tray stays, and quitting is an explicit choice from its menu.

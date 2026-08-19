@@ -9,7 +9,7 @@ import path from "node:path";
 // variable rather than a constant because that migration should be a config change, not a rebuild.
 export const APP_ORIGIN = process.env.LANDED_URL ?? "http://localhost:3000";
 
-type Stored = { assetRoot?: string };
+type Stored = { assetRoot?: string; drainEnabled?: boolean };
 
 // userData depends on the app's identity, and desktop/package.json sets productName: "Landed" for
 // that reason. Electron otherwise falls back to `name` — and this workspace is scoped, so
@@ -30,6 +30,19 @@ const write = (next: Stored) => {
 };
 
 let assetRoot: string | null = null;
+
+/**
+ * Whether the supervisor should be draining. Persisted, because a pause the user set deliberately
+ * must survive a restart — an app that quietly resumes work after a reboot is worse than one that
+ * never offered to stop.
+ *
+ * Defaults to on: an app installed to run jobs should run them.
+ */
+export const drainEnabled = (): boolean => read().drainEnabled !== false;
+
+export function setDrainEnabled(on: boolean): void {
+  write({ ...read(), drainEnabled: on });
+}
 
 /** The folder the user chose. Throws if called before ensureAssetRoot() has resolved one. */
 export function getAssetRoot(): string {

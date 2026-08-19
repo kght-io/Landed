@@ -1,7 +1,7 @@
 {
-  // Emits CommonJS into dist/ because that is what Electron's main process and a sandboxed preload
-  // load without ceremony. The repo-wide gate (root tsconfig.json) type-checks these same files
-  // under the shared settings; this config exists to BUILD them, not to check them.
+  // Type-checking only. esbuild does the BUILD, because these files import across the workspace
+  // (@landed/shared) and from node_modules (fflate), and a bundle is what makes those resolvable
+  // inside a packaged Electron app without shipping node_modules.
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
@@ -10,9 +10,10 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "sourceMap": true
+    "noEmit": true,
+    "paths": {
+      "@landed/shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

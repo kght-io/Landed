@@ -1,14 +1,16 @@
 import { eq } from "drizzle-orm";
 import { db } from "./index";
 import { postings, companies, prepAttempts, prepQuestions, prepCompany, jobs, events } from "./schema";
+import { APPLIED_STATES, OFFER_STATES } from "@landed/shared/experiments/prompts";
 
 // Dashboard aggregation — everything the /dashboard page shows, computed from existing tables in one
 // pass. `state` is a single point-in-time value, so funnel counts are CUMULATIVE ("reached at least
 // this stage"): the `interviewed` flag + downstream states stand in for history.
 
-const APPLIED_STATES = new Set(["applied", "interview", "offer", "accepted", "rejected", "ghost", "withdrawn"]);
+// APPLIED_STATES / OFFER_STATES come from the shared experiments module: the prompt-comparison view
+// asks the same "was this submitted / did a human engage" question of the same rows, and two copies
+// of that rule would let the two screens disagree about the same applications.
 const ACTIVE_STATES = new Set(["applied", "interview", "offer"]); // in-flight, not closed
-const OFFER_STATES = new Set(["offer", "accepted"]);
 
 export type Tone = "good" | "warning" | "critical" | "neutral" | "accent";
 // A time-series computed at two granularities the UI toggles between (default: week). "week" = last

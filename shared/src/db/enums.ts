@@ -21,3 +21,9 @@ export const JOB_STATUSES = ["queued", "wip", "ingested", "failed"] as const;
 // held until you approve it (a plain TEXT column, so no migration — see backend/src/db/index.ts).
 export const PENDING_KINDS = ["match", "unbound", "change"] as const;
 export const PENDING_STATUSES = ["pending", "resolved", "dismissed"] as const;
+
+// The agent phases whose *judgment* half is user-editable and versioned (prompt_versions). Each
+// feature keeps its own 1-based version series and exactly one active row. Adding a third editable
+// block (e.g. glance guidance) is one value here plus one posting column — no table change.
+export const PROMPT_FEATURES = ["fit", "tailoring"] as const;
+export type PromptFeature = (typeof PROMPT_FEATURES)[number];

@@ -3,7 +3,7 @@
 import { db } from "@landed/backend/db";
 import {
   postings, companies, events, interviews, jobs, appConfig, agentRuns, pendingMatches, todos,
-  threads, threadSteps, prepTranscripts, prepEmails,
+  threads, threadSteps, prepTranscripts, prepEmails, promptVersions,
 } from "@landed/backend/db/schema";
 import type { Status } from "@landed/shared/types";
 import { listPendingMatches } from "@landed/backend/db/queries";
@@ -17,7 +17,7 @@ export function reset() {
   // Children before parents — interviews FK→postings, postings FK→companies — so FK enforcement
   // (foreign_keys=ON) doesn't reject the deletes once interview rows actually exist.
   // threadSteps before threads for the same reason (by convention — they're linked by id, not an FK).
-  for (const t of [interviews, postings, pendingMatches, events, jobs, agentRuns, appConfig, todos, threadSteps, threads, prepTranscripts, prepEmails]) db.delete(t).run();
+  for (const t of [interviews, postings, pendingMatches, events, jobs, agentRuns, appConfig, todos, threadSteps, threads, prepTranscripts, prepEmails, promptVersions]) db.delete(t).run();
   db.delete(companies).run();
 }
 

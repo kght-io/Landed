@@ -66,6 +66,9 @@ export type RedoTurn = {
   diff?: DiffOp[]; // tailor agent turns — the agent's annotated tailored-vs-base diff (each changed line + why)
   fitScore?: number; // fit agent turns
   fit?: FitAssessment; // fit agent turns — the full snapshot for this version
+  // The judgment-prompt version this attempt ran under (prompt_versions.id), stamped at claim time.
+  // Absent on user turns and on anything that ran before prompt versioning.
+  promptVersionId?: number;
 };
 
 // The interview brief — a versioned overview the agent generates from the interview-prep asset

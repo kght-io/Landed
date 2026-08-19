@@ -1,5 +1,6 @@
 import { getConfig } from "@landed/backend/db/config-store";
-import { getProfile, getLevelingRef } from "@landed/backend/db/profile";
+import { getLevelingRef } from "@landed/backend/db/profile";
+import { agentProfile } from "@landed/backend/db/prompts";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function GET() {
   try {
     return Response.json({
       inboxLastSynced: getConfig("inbox_last_synced") ?? null,
-      profile: getProfile(),
+      profile: agentProfile(),
       levelingRef: getLevelingRef(),
     });
   } catch (err) {

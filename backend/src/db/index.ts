@@ -5,11 +5,12 @@ import { ASSET_ROOT } from "../config";
 import Database from "better-sqlite3";
 import { addColumn } from "./add-column";
 import { backfillPrepAssets } from "./backfill-prep-assets";
+import { adoptCarvedOutJudgment, backfillBaselineAttribution, renumberBaselineToV0, seedPromptVersions } from "./seed-prompts";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import {
   POSTING_STATES, POSTING_VERDICTS, POSTING_CHANNELS, COMPANY_TIERS,
-  JOB_STATUSES, PENDING_KINDS, PENDING_STATUSES,
+  JOB_STATUSES, PENDING_KINDS, PENDING_STATUSES, PROMPT_FEATURES,
 } from "@landed/shared/db/enums";
 
 // DB lives at the REPO ROOT (gitignored), NOT in iCloud — see config discussion. Anchored on
@@ -260,6 +261,8 @@ function connection() {
     ["thread_id", "thread_id TEXT"], // the agent chat (thread) that claimed it — see threads table
     ["attempts", "attempts INTEGER NOT NULL DEFAULT 0"], // claims so far — stuck-job detection
     ["error", "error TEXT"], // dead-letter reason (auto "stuck after N attempts" or agent-reported)
+    // Which versioned judgment prompt this run read — stamped at CLAIM time (see jobs/queue.ts).
+    ["prompt_version_id", "prompt_version_id INTEGER"],
   ] as const) {
     if (!jobCols.has(name)) addColumn(sqlite, `ALTER TABLE jobs ADD COLUMN ${ddl}`);
   }
@@ -290,6 +293,21 @@ function connection() {
     duration_ms INTEGER,
     summary TEXT
   )`);
+  // The user-editable judgment half of the fit / tailoring prompts, versioned. `prompt_versions_one_active`
+  // is a PARTIAL unique index: it constrains only rows with active=1, so "exactly one active version
+  // per feature" is enforced by the DB rather than by the store's discipline. See db/schema.ts.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS prompt_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feature TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    label TEXT,
+    body TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS prompt_versions_feature_version ON prompt_versions(feature, version)");
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS prompt_versions_one_active ON prompt_versions(feature) WHERE active = 1");
   // Fit labeling / eval set — per-criterion verdicts + the human labels. Own tables, separate from
   // the live discovery/fit flow. See packages/core/src/fitlab/ and db/schema.ts.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS fit_criteria (
@@ -382,6 +400,10 @@ function connection() {
     ["comp", "comp TEXT"], // interview comp-structure intel (markdown)
     ["team_notes", "team_notes TEXT"], // team / product / work intel (markdown)
     ["posted_at", "posted_at TEXT"], // ATS posted/published date (Ashby publishedAt / Greenhouse updated_at), when available
+    // Which prompt version produced the LATEST fit / tailor result — the measurement dimensions the
+    // callback comparison groups by. Null = ran before versioning (the baseline), or never tailored.
+    ["fit_prompt_version_id", "fit_prompt_version_id INTEGER"],
+    ["tailor_prompt_version_id", "tailor_prompt_version_id INTEGER"],
   ] as const) {
     if (!candCols.has(name)) addColumn(sqlite, `ALTER TABLE postings ADD COLUMN ${ddl}`);
   }
@@ -437,7 +459,7 @@ function connection() {
   // Structural CREATE/ALTER above is idempotent and runs every boot; these rewrite *data*, so we
   // gate them on PRAGMA user_version to run once (not on every connection) and to make ordering
   // explicit. Each is also idempotent on its own — the gate is belt-and-suspenders.
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 7;
   const userVersion = sqlite.pragma("user_version", { simple: true }) as number;
   if (userVersion < 1) {
     // v1: tier values renamed top_target/target/practice → tier1/tier2/tier3 (stable slugs).
@@ -474,6 +496,30 @@ function connection() {
       "DELETE FROM jobs WHERE type='fit' AND status IN ('queued','wip') " +
         "AND json_extract(params, '$.postings[0].id') IS NULL",
     );
+  }
+  if (userVersion < 4) {
+    // v4: the two judgment blocks moved off the profile blob into versioned rows. Lift whatever is
+    // stored there into v1 of each feature so a tuned install keeps its own text as the baseline
+    // every pre-existing application is attributed to. The stale keys are LEFT in the blob: they're
+    // inert once the type stops naming them (getProfile's spread absorbs them), and rewriting the
+    // blob to drop two dead keys would risk the whole profile for no gain.
+    seedPromptVersions(sqlite);
+  }
+  if (userVersion < 5) {
+    // v5: the judgment itself (how gaps are weighted, how a résumé is reworded) moved out of
+    // instructions/fit.md + tailoring.md into the versioned prompt, so the editable block is the
+    // thing that actually decides the output rather than a nudge on top of fixed rules.
+    adoptCarvedOutJudgment(sqlite);
+  }
+  if (userVersion < 6) {
+    // v6: the inherited baseline is v0, so "v1" means the first prompt change you made yourself.
+    renumberBaselineToV0(sqlite);
+  }
+  if (userVersion < 7) {
+    // v7: point pre-versioning fit / tailoring results at v0 so the baseline is a named cohort in
+    // the callback comparison. Only where the run actually happened — see the function's comment;
+    // "applied" is not the same as "the agent worked on it".
+    backfillBaselineAttribution(sqlite);
   }
   // v3 is the prep-knowledge tables (prep_transcripts / prep_emails). Structural only — the
   // CREATE TABLEs above do the whole job, and there is no data to rewrite, so this version has no
@@ -547,6 +593,7 @@ function connection() {
     { col: "kind", values: PENDING_KINDS },
     { col: "status", values: PENDING_STATUSES },
   ]);
+  enumGuard("prompt_versions", [{ col: "feature", values: PROMPT_FEATURES }]);
 
   // ── Optional events retention ────────────────────────────────────────────────────────────
   // The audit log is kept forever by default. Set EVENTS_RETENTION_DAYS to prune older rows on

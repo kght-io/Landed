@@ -1,7 +1,9 @@
 # Job: tailoring
 
-Tailor my base resume to each queued posting so it's ready to submit. Reframe my real
-experience to mirror the JD and clear ATS — **never invent** experience.
+Tailor my base resume to each queued posting so it's ready to submit.
+
+**How to tailor lives in my `tailorGuidance`, not in this file.** This playbook is the plumbing —
+what to read, the helper that writes the files, what shape to hand back. See step 1.
 
 ## What to read
 1. The **JD** for each posting in `params.postings` (each has an `id`, `company`, `role`, `jd`, and
@@ -10,52 +12,23 @@ experience to mirror the JD and clear ATS — **never invent** experience.
    posting's `id` — you echo it back in the result.
 2. My **base resume**: `resume/resume-ref.docx` — the ONLY source. Never edit it; copy from it.
 3. The posting's prior **fit** record if present (gaps + leveling call) — use it to steer the edits.
-4. My **profile** from `getContext` — honor my **`tailorGuidance`** (how I want résumés tailored:
-   tone, emphasis, wording, things to include or avoid). This is my standing guidance for tailoring;
-   there is no per-job note field, so always check it. (If it's blank, use your own judgement.)
+4. My **profile** from `getContext` — this carries my **`tailorGuidance`**, which is the tailoring
+   method itself (step 1). There is no per-job note field, so always read it.
 
-## Steps (per posting) — do ALL of these. None are optional.
+## Steps (per posting) — do BOTH of these. Neither is optional.
 
-A tailor that only edits the summary and skills lines is **incomplete** — the experience
-bullets must be **actively reworded to mirror the JD's exact terms** (truthfully), not merely
-considered. Reframing bullets into the JD's vocabulary is the default; leaving a bullet untouched
-is the rare exception (see 2c). Work every zone below for every posting.
+1. **Tailor the résumé exactly as my `tailorGuidance` says.** That guidance from `getContext` IS
+   the method for this job — the plan to write before editing, the zones to work, how far to rewrite
+   a bullet, and the truthfulness bar. Read it before you touch anything and satisfy every part of
+   it; a tailor that skips a part of it is incomplete, not merely lighter.
 
-1. **Write the tailoring plan first** (produce this before editing — it's the audit trail):
-   - **Keywords to mirror** — the exact languages, frameworks, systems, and domain terms the JD
-     names that I can *truthfully* claim.
-   - **Lead bullets** — which existing bullets are most relevant to THIS JD (they move to the
-     top of their role/section).
-   - **Downplay** — which bullets are least relevant (they move down — never delete real
-     experience, only reorder).
-   - **Hard gaps** — each hard gap from the fit record + how you'll address it honestly (reframe
-     an adjacent real bullet, or leave it; never fake it).
+   This playbook deliberately owns only the plumbing, because the method is mine to tune and I
+   version it so I can tell which version earned callbacks. Don't reason about *which* version you
+   have — there is one guidance and it's the current one. (If it is ever blank, use your own
+   judgement.) Whatever it tells you to explain about an edit, explain it in the `diff` comments
+   under Output — that's the only place your reasoning is recorded.
 
-2. **Work through all four zones for every posting** (summary, skills, gaps, and bullets all
-   normally change — bullets are reworded into the JD's terms by default; all four must be
-   actively worked, not just considered):
-   - **a. Summary / headline** — retitle to the posting's level and reframe the 2–3 sentences
-     around the JD's focus.
-   - **b. Skills lines** — reorder Languages and Backend to lead with the JD's named stack;
-     surface truthfully-held tools the JD calls out.
-   - **c. Experience bullets — reword to mirror the JD by default** — for each role, rewrite the
-     bullets so they carry the JD's exact languages, frameworks, systems, and domain terms that I
-     can *truthfully* claim (same facts, JD vocabulary), and reorder so the JD-relevant ones lead.
-     If the JD names a term my real work covers, the bullet should say it in the JD's words.
-     **Keeping a bullet as-is is the exception** — allowed only when there is genuinely no truthful
-     JD keyword to surface in it. When you do keep one, the diff must say why (an `eq` line with a
-     one-clause comment). Never invent: reword and reorder real work only — same facts, no new claims.
-   - **d. Gaps** — apply the honest gap treatment from your plan.
-
-3. Stay truthful — reprioritize and reword what I've actually done; never invent. Same facts,
-   reframed; no new claims.
-
-4. **Self-check before saving** — confirm: (i) every JD must-have keyword I can truthfully claim
-   appears, **including inside the experience bullets** — not just the summary/skills lines;
-   (ii) each role's bullets were reworded into the JD's vocabulary (or, for any bullet kept as-is,
-   the diff comment says why no truthful keyword applied); (iii) nothing fabricated.
-
-5. **Produce the files with the `tailor:docx` helper — do NOT hand-edit `document.xml`.** Word
+2. **Produce the files with the `tailor:docx` helper — do NOT hand-edit `document.xml`.** Word
    splits one visible sentence across several runs (the base résumé's "…built a 0" | "→" |
    "1 full-stack product…"), so string-searching the raw XML for a phrase misses any match that
    straddles a run — that's the trap that used to send this job probing byte offsets and corrupting

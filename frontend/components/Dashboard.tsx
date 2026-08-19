@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Briefcase, CalendarDays, GitBranchPlus, Bot, GraduationCap } from "lucide-react";
 import { ago } from "@landed/shared/format/time";
 import type { DashboardStats, Tone, SeriesPoint, PrepPoint } from "@landed/backend/db/dashboard";
@@ -60,7 +61,15 @@ export default function Dashboard() {
                 </Card>
               </div>
 
-              <Card title="Agents" icon={<Bot size={14} className="text-sky-300" />}>
+              <Card
+                title="Agents"
+                icon={<Bot size={14} className="text-sky-300" />}
+                action={
+                  <Link href="/dashboard/prompts" className="ml-auto text-[11px] text-sky-400 transition hover:text-sky-300">
+                    Prompt experiments →
+                  </Link>
+                }
+              >
                 <MiniStats items={[["Jobs done", d.agent.done], ["Queued", d.agent.queued], ["Working", d.agent.wip]]} />
               </Card>
             </div>

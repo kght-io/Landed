@@ -3,15 +3,19 @@ import { DEFAULT_LEVELING_REF, type LevelingRef } from "@landed/shared/config/le
 
 // The candidate's search identity — the source of truth for what counts as a fit. Read by the
 // scan's second pass (the agent) and the fit playbook's leveling. Stored as one JSON blob in
-// app_config under "profile"; editable on the Discovery page.
+// app_config under "profile"; editable on the Profile page.
+//
+// The two judgment blocks the agent honors (`fitGuidance` / `tailorGuidance`) USED to live here.
+// They're versioned rows now (db/prompts.ts) so a prompt change can be attributed to the callbacks
+// it earned; `agentProfile()` splices the active bodies back in under the same keys, so what
+// /api/context hands the agent is unchanged. Old blobs still carry the two dead keys — inert, since
+// this type no longer names them and getProfile's spread absorbs anything extra.
 export type Profile = {
   levelBaseline: string; // who I am, level-wise
   levelRule: string; // how to pick the target level per company
   includeDisciplines: string[]; // SWE disciplines that count as a match
   excludeDisciplines: string[]; // disciplines to drop even if the title says "engineer"
   locations: string; // where I'll work
-  fitGuidance: string; // how the agent should assess fit (honored by fit.md)
-  tailorGuidance: string; // how the agent should tailor the resume (honored by tailoring.md)
 };
 
 const PROFILE_KEY = "profile";
@@ -26,10 +30,6 @@ export const DEFAULT_PROFILE: Profile = {
   includeDisciplines: ["backend", "fullstack", "platform", "infrastructure", "distributed systems"],
   excludeDisciplines: ["hardware / embedded", "IT / sysadmin"],
   locations: "Remote (US)",
-  fitGuidance:
-    "Weight leveling match and hard-gap coverage most; the score is secondary. Be honest — a weak or partial match is a 'low', not a stretch. Favor roles at or near my level and flag big level stretches. Call out any hard must-have I clearly lack.",
-  tailorGuidance:
-    "Mirror the JD's exact terms — but only what I can truthfully claim; never invent experience. Lead with my most relevant bullets, keep them concrete and metric-driven, and address the fit record's hard gaps honestly. Keep the resume ATS-clean: standard sections, no tables or graphics.",
 };
 
 export function getProfile(): Profile {
@@ -42,9 +42,16 @@ export function getProfile(): Profile {
   }
 }
 
-// Merge a partial patch over the current profile and persist.
+// Merge a partial patch over the current profile and persist. The patch arrives from an untyped
+// HTTP body, so only keys this type still names survive — a stale caller POSTing `fitGuidance` here
+// (it lived on the profile until prompt versions took over) writes nothing, instead of landing a
+// key nothing reads. Persisting only known keys also retires the dead ones on the next save.
 export function setProfile(patch: Partial<Profile>): Profile {
-  const next = { ...getProfile(), ...patch };
+  const current = getProfile();
+  const next = { ...current };
+  for (const k of Object.keys(DEFAULT_PROFILE) as (keyof Profile)[]) {
+    if (patch[k] !== undefined) (next[k] as Profile[keyof Profile]) = patch[k]!;
+  }
   setConfig(PROFILE_KEY, JSON.stringify(next));
   return next;
 }

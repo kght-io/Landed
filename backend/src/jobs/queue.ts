@@ -4,7 +4,9 @@ import { jobs, postings, threads } from "../db/schema";
 import { getConfig, setConfig, deleteConfig } from "../db/config-store";
 import { logEvent } from "../db/queries";
 import { jobDef } from "./registry";
+import { stampClaimedPrompt } from "./prompt-stamp";
 import { parseRedoLog, pendingUserIndex } from "@landed/shared/jobs/redolog";
+import { postingIdIn } from "@landed/shared/jobs/params";
 import { CLAIM_LEASE_MS, isStaleClaimAt } from "@landed/shared/jobs/lease";
 import type { ChangeDetail } from "@landed/shared/agents/types";
 import type { RedoPhase } from "@landed/shared/types";
@@ -91,13 +93,9 @@ export const parseParams = (raw: string | null | undefined): Record<string, unkn
   }
 };
 
-// The posting a fit/tailoring job is a projection of. `params.postings` stays an ARRAY on the wire
-// (the playbooks and the agent read it that way), but every path that creates one of these jobs
-// writes exactly one entry — the job id is per-posting — so app code reads the first and stops.
-const postingIdOf = (raw: string | null | undefined): number | null => {
-  const n = Number((parseParams(raw).postings as { id?: unknown }[] | undefined)?.[0]?.id);
-  return Number.isFinite(n) ? n : null;
-};
+// The posting a fit/tailoring job is a projection of, read off the stored params blob. The
+// convention itself lives in shared/jobs/params so the two prompt stamps read it the same way.
+const postingIdOf = (raw: string | null | undefined): number | null => postingIdIn(parseParams(raw));
 
 export type JobView = {
   id: string;
@@ -360,6 +358,12 @@ function tryClaim(id: string, by?: string | null, threadId?: string | null): Job
     if (released.changes) logEvent({ entity: "job", action: "update", source: "cowork", actor: "CoWork", summary: `released ${released.changes} stale wip job(s) — agent moved on to ${id}` });
   }
   const job = getJobView(id);
+  // Stamp the judgment-prompt version this run will read (fit / tailoring only). Kept OUT of the
+  // atomic take above — that statement is the concurrency primitive and stays a single conditional
+  // UPDATE — and read off the view we already have rather than re-querying the row. Why claim time
+  // and not ingest: see prompt-stamp.ts.
+  const feature = job ? jobDef(job.type)?.promptFeature : undefined;
+  if (feature) stampClaimedPrompt(id, feature);
   if (job) logEvent({ entity: "job", action: "update", source: "cowork", actor: "CoWork", summary: `claimed ${job.type} job ${id} (wip)` });
   return job;
 }

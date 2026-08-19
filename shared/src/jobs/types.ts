@@ -1,5 +1,6 @@
 import type { ReconcileResult } from "../agents/types";
 import type { RedoPhase } from "../types";
+import type { PromptFeature } from "../db/enums";
 
 export type JobType =
   | "watchlist-add"
@@ -80,4 +81,8 @@ export type JobDef = {
   // drops the trailing pending user turn from the posting's conversation, so the "Queued for redo"
   // tag clears instead of dangling.
   redoPhase?: RedoPhase;
+  // This type's judgment half is user-editable and versioned (db/prompts.ts). Claiming one of these
+  // stamps the then-active version on the job row, so the result it produces can be attributed to
+  // the prompt that produced it. Types without this run on repo-owned prose only.
+  promptFeature?: PromptFeature;
 };

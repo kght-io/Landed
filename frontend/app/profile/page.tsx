@@ -32,7 +32,7 @@ export default function ProfilePage() {
             icon={<Bot size={17} />}
             accent="sky"
             title="Agent guidance"
-            description="How the agents assess fit and tailor your résumé — standing guidance both playbooks honor. Defaults are sensible; edit to steer them, or blank a field to leave it to the agent."
+            description="How the agents assess fit and tailor your résumé — the judgment half of both prompts, versioned so you can try a change and see whether it earned more callbacks. The workflow half stays in the playbooks."
           >
             <AgentGuidancePanel />
           </SettingsCard>

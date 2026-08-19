@@ -4,6 +4,7 @@ import {
   ingestPeerComp, ingestPrep, ingestLeetcodeAddJob, ingestPrepResearchJob, ingestDiscovered,
   noopIngest, unqueueCandidate, ingestInboxSync, peerCompTask,
 } from "./ingest";
+import { recordPromptVersion } from "./prompt-stamp";
 import type { JobDef, JobType } from "@landed/shared/jobs/types";
 
 // ── the job type table ──
@@ -54,6 +55,8 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     onUnqueue: ({ postingId }) =>
       unqueueCandidate(postingId, { from: "fit_queue", to: "review", source: "discovery", label: "fit" }),
     redoPhase: "fit",
+    promptFeature: "fit",
+    afterIngest: (ctx) => recordPromptVersion(ctx, "fit"),
   },
   tailoring: {
     type: "tailoring",
@@ -69,6 +72,8 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     onUnqueue: ({ postingId }) =>
       unqueueCandidate(postingId, { from: "tailoring", to: "assessed", source: "tailoring", label: "tailoring", guard: (c) => !c.resumeDir }),
     redoPhase: "tailor",
+    promptFeature: "tailoring",
+    afterIngest: (ctx) => recordPromptVersion(ctx, "tailor"),
   },
   "inbox-sync": {
     type: "inbox-sync",

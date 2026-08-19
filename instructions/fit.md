@@ -1,8 +1,9 @@
 # Job: fit
 
-Assess how well I fit each posting. What I actually act on is **(1) the main gaps** and
-**(2) a leveling-match call** — the score is secondary. Gaps and level drive my decision to
-tailor, apply as-is, or skip.
+Assess how well I fit each posting, so I can decide to tailor, apply as-is, or skip.
+
+**How to judge fit lives in my `fitGuidance`, not in this file.** This playbook is the plumbing —
+what to read, which tools to call, what shape to hand back. See "What to assess".
 
 ## What to read
 1. The **JD** for each posting in `params.postings` (each has an `id`, `company`, `role`, a `jd`,
@@ -15,45 +16,22 @@ tailor, apply as-is, or skip.
      it's a cheap idempotent write. It's a **separate** call from `submitJobResult`; don't try to
      pass the JD back inside the fit result.
 2. My **base resume**: `resume/resume-ref.docx`.
-3. My **profile** from `getContext` — read my **`fitGuidance`** (how I want fit judged: what to
-   weight, how strict to be) and honor it throughout. It also carries my level baseline + rule for
-   the leveling call below. (If `fitGuidance` is blank, use your own judgement.)
-
-Judge gaps and level against what you actually know about me, not just keyword overlap.
+3. My **profile** from `getContext`. It carries my **`fitGuidance`** — see below — plus my **level
+   baseline** (my current / most-recent level and how long I've held it), my **target-level rule**,
+   and my disciplines / background. My base resume (above) is the fuller record.
 
 ## What to assess (per posting)
 
-### 1. Main gaps — the primary output
-The few gaps that actually decide *this* screen, each tagged **hard** or **soft**:
-- **hard** = a concrete requirement I don't clearly meet (specific tech/stack, domain,
-  years, a credential, on-site/location, etc.).
-- **soft** = scope/leadership/ambiguity/communication-type expectations I'd have to stretch
-  into.
+**`fitGuidance` from `getContext` IS this job's method** — how I want gaps weighted, how the
+leveling call is made, and how strict to be. Read it and follow it in full. It is the substance of
+this job, not a footnote to it: this playbook deliberately owns only the plumbing (what to read,
+what to call, what shape to hand back), because the judgment is mine to tune and I version it so I
+can tell which version earned callbacks. Don't reason about *which* version you have — there's one
+guidance and it's the current one. (If it is ever blank, use your own judgement.)
 
-Keep it to the **2–4 that matter** — not an exhaustive checklist. If there's no real gap,
-say so plainly.
-
-### 2. Leveling match
-Read my **profile** from `getContext` first — it carries my **level baseline** (my current /
-most-recent level and how long I've held it), the **target-level rule**, and my disciplines /
-background; my base resume (below) is the fuller record. Judge the posting against that baseline,
-never a hardcoded one. The level I should target typically depends on company size:
-- **Bigger / rigorous-leveling companies** (FAANG-scale, large public, strict ladders) →
-  hold at the level that maps to my baseline; the rung above is a stretch, especially when I've
-  only recently reached my current level.
-- **Smaller companies / startups** (title inflation, broader scope per IC) → the rung above my
-  baseline is a fair target.
-
-Call the posting's advertised level exactly one of:
-- **match** — lines up with where I'd land at this company size.
-- **stretch** — a level above where I'd realistically land (apply, but expect a harder bar).
-- **under-leveled** — below my level; likely a step back.
-
-One line on why, grounded in company size + my level baseline from the profile.
-
-### 3. fitScore (0–100)
-A rough sortable signal, weighted: must-have **hard-gap** coverage (most), then **leveling
-match**, then domain overlap. Don't over-think it.
+Produce, per posting: the **main gaps** (each tagged `hard` or `soft`), a **leveling call**, and a
+**fitScore** (0–100). The exact shape of each is under Output below; `fitGuidance` decides what
+goes in them.
 
 ## Output
 Hand the result back with the **`submitJobResult` MCP tool** — `type: "fit"`, `jobId` = the
@@ -84,7 +62,7 @@ job's id, and `records` = one rich object per posting. **Give real detail, not o
 Field rules:
 - `id` — **copy `params.postings[].id` back exactly, unchanged.** This is how the app matches your
   result to the right posting. Don't omit it, don't invent one — just echo the number you were given.
-- `fitScore` — 0–100 (see above).
+- `fitScore` — 0–100; `fitGuidance` says how to weight it.
 - `levelMatch.call` — exactly one of `match` · `stretch` · `under-leveled`; `levelMatch.why` — one line.
 - `recommendation` — exactly one of `tailor` · `apply` · `skip`.
 - `strengths` — the few that matter (array of strings); omit if none stand out.

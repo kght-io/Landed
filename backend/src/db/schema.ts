@@ -1,7 +1,7 @@
 import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
 import {
   POSTING_STATES, POSTING_VERDICTS, POSTING_CHANNELS, COMPANY_TIERS,
-  PENDING_KINDS, PENDING_STATUSES,
+  PENDING_KINDS, PENDING_STATUSES, PROMPT_FEATURES,
 } from "@landed/shared/db/enums";
 
 // Tier of a company. Drives the pipeline rules (see shared/src/pipeline/stages.ts).
@@ -126,6 +126,10 @@ export const jobs = sqliteTable("jobs", {
   // process, which stamps this on claim via the x-jobhunt-thread header — so jobs group under the
   // session that's running them, without the agent having to pass anything. See `threads` below.
   threadId: text("thread_id"),
+  // The versioned judgment prompt this run read, stamped when the job was CLAIMED — the instant the
+  // agent commits to the run, just before it pulls the guidance from getContext. Null for job types
+  // with no editable prompt, and for runs that predate versioning. See jobs/queue.ts `tryClaim`.
+  promptVersionId: integer("prompt_version_id"),
 });
 
 // ── the agent threads ──
@@ -403,6 +407,38 @@ export const postings = sqliteTable("postings", {
   appliedDate: text("applied_date"),
   updatedAt: text("updated_at"),
   postedAt: text("posted_at"), // ATS posted/published date (from the scan), when available
+  // Which prompt version produced the LATEST fit / tailor result here — copied off the job row when
+  // the result lands (registry.ts `afterIngest`). These are the dimensions the callback comparison
+  // groups by; the full per-version history stays in redo_log. Null = ran before versioning (the
+  // baseline cohort), or, for the tailor column, never tailored at all.
+  fitPromptVersionId: integer("fit_prompt_version_id"),
+  tailorPromptVersionId: integer("tailor_prompt_version_id"),
+});
+
+// ── Versioned judgment prompts ──────────────────────────────────────────────────────────────
+// The user-editable HALF of the fit / tailoring prompts: how fitness is judged, how a résumé is
+// tailored. The other half — which MCP tool to call, the result schema, file paths — stays in the
+// repo playbooks (instructions/*.md) and is never editable here. The active row's `body` is what
+// `getContext` hands the agent as fitGuidance / tailorGuidance, so the agent surface never changes
+// shape and the agent is never told a version exists (that would confound the measurement).
+//
+// Rows are NEVER hard-deleted: postings.fit_prompt_version_id / tailor_prompt_version_id point at
+// them, and a result outlives the prompt that produced it. Archive instead — `archived` filters the
+// editor's picker only, never the comparison view.
+//
+// Not to be confused with the dormant `fit_runs.prompt_version` below: that's a TEXT tag inside the
+// removed Fit Lab's eval store, unrelated to this.
+export const promptVersions = sqliteTable("prompt_versions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  feature: text("feature", { enum: PROMPT_FEATURES }).notNull(),
+  version: integer("version").notNull(), // 1-based, per feature (unique with `feature`)
+  label: text("label"), // short name for the picker — carries the "why" of this attempt
+  body: text("body").notNull(), // the editable judgment markdown handed to the agent
+  // Exactly one active row per feature, enforced by a partial unique index (see db/index.ts) —
+  // an invariant the DB checks, not a convention the store remembers.
+  active: integer("active", { mode: "boolean" }).notNull().default(false),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull(),
 });
 
 // ── Fit labeling / eval set ─────────────────────────────────────────────────────────────────
@@ -458,6 +494,8 @@ export const fitVerdicts = sqliteTable("fit_verdicts", {
   humanNote: text("human_note"),
   labeledAt: text("labeled_at"),
 });
+
+export type PromptVersionRow = typeof promptVersions.$inferSelect;
 
 export type FitCriterionRow = typeof fitCriteria.$inferSelect;
 export type FitRunRow = typeof fitRuns.$inferSelect;

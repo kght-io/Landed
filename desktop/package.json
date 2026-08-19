@@ -1,6 +1,7 @@
 {
   "name": "@landed/desktop",
   "version": "0.1.0",
+  "productName": "Landed",
   "private": true,
   "description": "The Electron shell. A window onto the app (wherever it runs) plus the capabilities a browser cannot offer: revealing folders and reading files on the machine the r\u00e9sum\u00e9s actually live on.",
   "main": "dist/main.js",

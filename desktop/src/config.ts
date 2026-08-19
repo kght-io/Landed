@@ -11,6 +11,9 @@ export const APP_ORIGIN = process.env.LANDED_URL ?? "http://localhost:3000";
 
 type Stored = { assetRoot?: string };
 
+// userData depends on the app's identity, and desktop/package.json sets productName: "Landed" for
+// that reason. Electron otherwise falls back to `name` — and this workspace is scoped, so
+// "@landed/desktop" was taken literally and settings nested under an "@landed" directory.
 const configFile = () => path.join(app.getPath("userData"), "config.json");
 
 const read = (): Stored => {

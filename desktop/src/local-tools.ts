@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Edit } from "@landed/shared/resume/docx";
 import { buildTailored, readVisibleText } from "./docx";
@@ -14,8 +16,13 @@ import { buildTailored, readVisibleText } from "./docx";
 // Root is a parameter rather than a module constant so the rules below are testable without an
 // Electron app around them.
 
-/** Same shape backend/src/db/prep.ts:311 generates. Anything else is not a slug we produced. */
-const isSlug = (s: string): boolean => /^[a-z0-9-]+$/.test(s);
+// The app's slug is a PATH, not a single name: tailoring writes versioned folders like
+// "acme-senior-123/v2" (see backend/src/config.ts resolveResume, which allows any slug that stays
+// inside the resume dir). So the rule is per SEGMENT — each one shaped like the slugs
+// backend/src/db/prep.ts:311 generates — with no empty segments, no traversal, and no leading
+// slash. Narrow enough that containment falls out of the charset instead of needing a realpath.
+const SLUG = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
+const isSlug = (s: string): boolean => SLUG.test(s);
 
 const baseResume = (root: string) => path.join(root, "resume", "resume-ref.docx");
 
@@ -25,8 +32,40 @@ export function readBaseResumeText(root: string): string {
 }
 
 export type BuildOutcome =
-  | { ok: true; path: string; missed: [] }
+  | { ok: true; path: string; pdf: string | null; missed: []; note?: string }
   | { ok: false; missed: string[]; error?: string };
+
+/**
+ * Render a .docx to PDF with LibreOffice, returning null when it is not installed.
+ *
+ * Still a subprocess — there is no in-process renderer worth trusting with a résumé's layout — but
+ * it is OURS now rather than the agent's. That matters twice: the agent no longer needs a shell to
+ * tailor (which is what let cwd stop being the repo), and a missing soffice becomes a value the
+ * agent can report instead of an exit code it might try to route around. The playbook is explicit
+ * that improvising with fpdf/reportlab/pandoc is wrong; this makes that the easy path.
+ *
+ * Injectable so the missing-binary branch is testable without uninstalling LibreOffice.
+ */
+export function convertToPdf(docx: string, outDir: string, run: typeof execFileSync = execFileSync): string | null {
+  try {
+    run("soffice", [
+      "--headless",
+      // A private profile dir: a soffice already open for the user holds a lock on the default one,
+      // and the conversion then silently does nothing.
+      "-env:UserInstallation=file:///tmp/lo-landed",
+      "--convert-to",
+      "pdf",
+      "--outdir",
+      outDir,
+      docx,
+    ]);
+  } catch {
+    return null; // not installed, or refused — the caller reports it rather than guessing
+  }
+  const pdf = path.join(outDir, "resume.pdf");
+  // soffice can exit 0 having written nothing; an empty file is the same failure as no file.
+  return fs.existsSync(pdf) && fs.statSync(pdf).size > 0 ? pdf : null;
+}
 
 /**
  * Write a tailored résumé to resume/<slug>/resume.docx.
@@ -42,7 +81,12 @@ export type BuildOutcome =
  * rewritten. Writing a sibling and renaming over the target sidesteps it: readers see either the
  * old file or the new one, never a half-written one.
  */
-export function buildTailoredResume(root: string, slug: string, edits: Edit[]): BuildOutcome {
+export function buildTailoredResume(
+  root: string,
+  slug: string,
+  edits: Edit[],
+  run: typeof execFileSync = execFileSync,
+): BuildOutcome {
   if (!isSlug(slug)) return { ok: false, missed: [], error: `not a slug: ${JSON.stringify(slug)}` };
 
   const base = baseResume(root);
@@ -61,5 +105,25 @@ export function buildTailoredResume(root: string, slug: string, edits: Edit[]): 
   fs.writeFileSync(tmp, built.docx);
   fs.renameSync(tmp, target);
 
-  return { ok: true, path: target, missed: [] };
+  // The PDF is rendered in a scratch dir and moved in, for the same fresh-inode reason as above.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "landed-pdf-"));
+  fs.copyFileSync(target, path.join(scratch, "resume.docx"));
+  const rendered = convertToPdf(path.join(scratch, "resume.docx"), scratch, run);
+  let pdf: string | null = null;
+  if (rendered) {
+    pdf = path.join(outDir, "resume.pdf");
+    const pdfTmp = path.join(outDir, `.resume.pdf.${process.pid}.tmp`);
+    fs.copyFileSync(rendered, pdfTmp);
+    fs.renameSync(pdfTmp, pdf);
+  }
+  fs.rmSync(scratch, { recursive: true, force: true });
+
+  return {
+    ok: true,
+    path: target,
+    pdf,
+    missed: [],
+    // A .docx with no PDF is a partial result the agent must SAY it produced, not paper over.
+    ...(pdf ? {} : { note: "LibreOffice (soffice) is not available — wrote resume.docx only, no PDF." }),
+  };
 }

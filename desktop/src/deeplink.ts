@@ -22,9 +22,12 @@ export type DeepLink =
 
 // A slug names one folder inside the chosen root. Anything that could mean "somewhere else" — a
 // separator, a traversal, an encoded one, an empty string — is not a slug.
-// Exactly the shape backend/src/db/prep.ts:311 generates. Narrow by design: the smaller the set,
-// the less there is to reason about when the input is hostile.
-const SLUG = /^[a-z0-9-]+$/;
+// The app's slug is a PATH, not a single name: tailoring writes versioned folders like
+// "acme-senior-123/v2" (see backend/src/config.ts resolveResume, which allows any slug that stays
+// inside the resume dir). So the rule is per SEGMENT — each one shaped like the slugs
+// backend/src/db/prep.ts:311 generates — with no empty segments, no traversal, and no leading
+// slash. Narrow enough that containment falls out of the charset instead of needing a realpath.
+const SLUG = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
 const isSlug = (s: string): boolean => SLUG.test(s);
 
 /**
@@ -48,7 +51,12 @@ export function parseDeepLink(raw: string): DeepLink | null {
   const action = url.hostname;
   let parts: string[];
   try {
-    parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    // Drop ONLY the empty produced by the leading slash. filter(Boolean) would also swallow "//",
+    // quietly turning a malformed path into a valid one — the sanitising this parser refuses to do.
+    const raw = url.pathname.split("/");
+    if (raw[0] === "") raw.shift();
+    if (raw.some((p) => p === "")) return null;
+    parts = raw.map(decodeURIComponent);
   } catch {
     return null; // malformed percent-encoding
   }
@@ -56,10 +64,12 @@ export function parseDeepLink(raw: string): DeepLink | null {
   if (action === "agent") return { action: "agent", type: parts.length === 0 ? null : (isSlug(parts[0]) ? parts[0] : null) };
 
   if (action === "reveal") {
-    const [kind, slug, ...rest] = parts;
-    if (rest.length > 0) return null;
-    if (kind === "assets" && slug === undefined) return { action: "reveal", target: { kind: "assets" } };
-    if ((kind === "resume" || kind === "prep") && slug !== undefined && isSlug(slug)) {
+    const [kind, ...tail] = parts;
+    if (kind === "assets" && tail.length === 0) return { action: "reveal", target: { kind: "assets" } };
+    // Rejoined rather than refused: a tailored résumé lives at "<slug>/v2", so the slug legitimately
+    // spans segments. isSlug is what keeps that from meaning "any path".
+    const slug = tail.join("/");
+    if ((kind === "resume" || kind === "prep") && slug !== "" && isSlug(slug)) {
       return { action: "reveal", target: { kind, slug } };
     }
     return null;

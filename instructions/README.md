@@ -18,6 +18,12 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
   `listCompanies`/`getContext`/`scanWatchlist`/`scanCompany`/`searchGmail`/`getGmailThread`. Writes:
   `claimNext`/`claimJob`/`submitJobResult`/`submitGlance`/`savePostingJd`/`createJob`/
   `upsertCompanies`/`addToWatchlist`/`removeFromWatchlist`/`updateApplication`/`logMockInterview`.
+- A second server, **`landed-local`**, is the machine you are running on — the user's own disk,
+  which the DB above knows nothing about. `readBaseResumeText` and `buildTailoredResume` are how
+  résumés get written (see `tailoring.md`); they replace the old `npm run tailor:docx` shell step.
+  Two servers rather than one because they answer to different places: `jobhunt` follows its URL to
+  the app wherever it runs, while résumés stay on this machine. If `landed-local` is not among your
+  tools, this checkout has not built it — say so rather than editing .docx files by hand.
 - **Gmail is app-owned too:** `searchGmail`/`getGmailThread` (read-only) are how inbox-sync reads
   mail — over the app's own IMAP connection (no external Gmail connector) — so it works the same for
   the Claude Code runner in any environment. Needs Gmail connected once in the app's Settings (app

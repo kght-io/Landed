@@ -47,8 +47,6 @@ test("traversal and separators in a slug are refused, not sanitised", () => {
   for (const bad of [
     "landed://reveal/resume/../../etc",
     "landed://reveal/resume/%2e%2e%2fetc",
-    "landed://reveal/resume/a%2fb",
-    "landed://reveal/resume/a/b",
     "landed://reveal/resume/",
   ]) {
     assert.equal(parseDeepLink(bad), null, bad);
@@ -75,4 +73,22 @@ test("every builder round-trips through the parser — the two halves cannot dri
   });
   assert.deepEqual(parseDeepLink(deepLink.agent()), { action: "agent", type: null });
   assert.deepEqual(parseDeepLink(deepLink.agent("tailoring")), { action: "agent", type: "tailoring" });
+});
+
+test("a versioned résumé slug spans segments — tailoring writes acme-corp/v2", () => {
+  // backend/src/config.ts resolveResume allows any slug that stays inside the resume dir, and the
+  // tailoring playbook says each redo is a new v<N> folder. A single-segment rule would refuse
+  // every real tailored résumé.
+  assert.deepEqual(parseDeepLink("landed://reveal/resume/acme-corp/v2"), {
+    action: "reveal",
+    target: { kind: "resume", slug: "acme-corp/v2" },
+  });
+  // Widening to segments must not widen to paths.
+  assert.equal(parseDeepLink("landed://reveal/resume/acme-corp/../../etc"), null);
+  assert.equal(parseDeepLink("landed://reveal/resume/acme-corp//v2"), null); // empty segment, not "//" normalised away
+  // Both spellings reach the same slug: the builder percent-encodes, a hand-written link may not.
+  assert.deepEqual(parseDeepLink("landed://reveal/resume/acme-corp%2Fv2"), {
+    action: "reveal",
+    target: { kind: "resume", slug: "acme-corp/v2" },
+  });
 });

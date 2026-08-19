@@ -33,6 +33,11 @@ const eslintConfig = defineConfig([
     // lintable source, and walking it fails the whole run with EACCES — which took out the
     // pre-push hook.
     "caddy/**",
+    // The desktop app's build output: esbuild bundles and the packaged .app. Both are generated,
+    // both are gitignored, and linting a bundle reports 80-odd errors about code nobody wrote —
+    // enough to block a push, which is how this was found.
+    "desktop/dist/**",
+    "desktop/release/**",
   ]),
 ]);
 

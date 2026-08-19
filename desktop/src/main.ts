@@ -1,9 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import path from "node:path";
 import { APP_ORIGIN, ensureAssetRoot, getAssetRoot } from "./config";
 import { listDir, resolveWithin } from "./browse";
 import { parseDeepLink } from "./deeplink";
 import { revealAssetFolder, revealPrepFolder, revealResumeFolder } from "./local-ops";
+import { runDrain } from "./agent";
+import { createDrainLoop, type WaitResult } from "./supervisor";
 
 // THE DESKTOP APP.
 //
@@ -26,6 +28,54 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 let rootReady = false;
 let pendingLink: string | null = null;
+let tray: Tray | null = null;
+let loop: ReturnType<typeof createDrainLoop> | null = null;
+
+// The queue types this app drains. Each gets its own loop, matching the queue's own model of one
+// process per type; two types can run at once, the same type never does.
+const DRAIN_TYPES = ["fit", "tailoring", "prep-research", "interview-brief", "inbox-sync"];
+
+// Long-poll the app for claimable work. The 25s hold is the queue's, not ours — there is no
+// interval here to tune, and an empty result simply means "ask again".
+async function pollForWork(type: string, signal: AbortSignal): Promise<WaitResult> {
+  const access =
+    process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET
+      ? {
+          "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
+          "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET,
+        }
+      : undefined;
+  const res = await fetch(`${APP_ORIGIN}/api/jobs/wait?type=${encodeURIComponent(type)}`, {
+    signal,
+    headers: access,
+  });
+  if (!res.ok) throw new Error(`wait ${type}: ${res.status}`);
+  return (await res.json()) as WaitResult;
+}
+
+// The tray is the only place a background process can tell the truth about itself. A supervisor
+// that has quietly stopped draining looks identical to an idle one from inside the browser.
+function refreshTray(): void {
+  if (!tray) return;
+  const status = loop?.status();
+  const running = status?.running ?? [];
+  const label = status?.stopped
+    ? "Not draining"
+    : running.length > 0
+      ? `Running: ${running.join(", ")}`
+      : "Idle — watching for work";
+  tray.setToolTip(`Landed — ${label}`);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label, enabled: false },
+      { type: "separator" },
+      { label: "Open Landed", click: () => void shell.openExternal(APP_ORIGIN) },
+      { label: "Show folder", click: () => revealAssetFolder() },
+      { type: "separator" },
+      { label: "Quit", click: () => app.quit() },
+    ]),
+  );
+}
 
 function focusWindow(): void {
   const [win] = BrowserWindow.getAllWindows();
@@ -125,6 +175,19 @@ app.whenReady().then(async () => {
   });
 
   rootReady = true;
+
+  tray = new Tray(nativeImage.createEmpty());
+  loop = createDrainLoop({
+    types: DRAIN_TYPES,
+    poll: pollForWork,
+    run: (type) => runDrain(type, APP_ORIGIN),
+    onError: (e, type) => console.error(`[drain:${type}]`, e),
+  });
+  refreshTray();
+  setInterval(refreshTray, 2000);
+  // Not awaited: the loop runs for the life of the app.
+  void loop.start();
+
   createWindow();
 
   // Drain anything that arrived before there was a root — including the link that launched us.
@@ -137,6 +200,10 @@ app.whenReady().then(async () => {
   });
 });
 
+// Closing the window does NOT stop draining — that is the whole point of a background supervisor.
+// The tray stays, and quitting is an explicit choice from its menu.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // deliberately empty
 });
+
+app.on("before-quit", () => loop?.stop());

@@ -174,7 +174,7 @@ function resolveCompany(key: string, name: string, actor: string, source: string
   const id = db.insert(companies).values({ name, tier, createdAt: ts, updatedAt: ts }).returning({ id: companies.id }).get().id;
   logEvent({ actor, source, entity: "company", entityId: id, action: "insert", summary: `new company ${name} [${tier}]` });
   return {
-    co: { id, name, tier, careersUrl: null, ats: null, fetchMethod: null, fetchRecipe: null, notes: null, slug: null, endpoint: null, targetTitles: null, targetLocation: null, leveling: null, lastScrapedAt: null, watchlist: false, cooldownUntil: null, createdAt: ts, updatedAt: ts },
+    co: { id, name, tier, careersUrl: null, ats: null, fetchMethod: null, fetchRecipe: null, notes: null, desire: null, slug: null, endpoint: null, targetTitles: null, targetLocation: null, leveling: null, lastScrapedAt: null, watchlist: false, cooldownUntil: null, createdAt: ts, updatedAt: ts },
     isNew: true,
   };
 }

@@ -9,11 +9,13 @@ import { useResizableColumns, ResTh } from "@/components/ResizableTable";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import PopoverPanel, { anchorFrom } from "@/components/Popover";
 import type { Tier } from "@landed/shared/types";
+import { DesireSelect } from "@/components/DesireTag";
+import { desireLabel, desireSortVal } from "@landed/shared/config/desire";
 
 // Scan config (fetch method + ATS, plus the recipe as a hover tooltip and a link out) lives in the
 // "Fetch" column — The agent-curated and read-only here.
-const WL_COLS = ["company", "tier", "titles", "fetch", "scraped", "cooldown", "pipeline", "actions"];
-const WL_DEFAULTS = { company: 170, tier: 100, titles: 200, fetch: 230, scraped: 110, cooldown: 132, pipeline: 130, actions: 104 };
+const WL_COLS = ["company", "want", "tier", "titles", "fetch", "scraped", "cooldown", "pipeline", "actions"];
+const WL_DEFAULTS = { company: 170, want: 104, tier: 100, titles: 200, fetch: 230, scraped: 110, cooldown: 132, pipeline: 130, actions: 104 };
 
 // How a company's board is read during a scan. The raw slugs (api / careers-get / browser) aren't
 // self-explanatory, so the Fetch column shows an explicit label + a tooltip describing each.
@@ -54,6 +56,7 @@ type Target = {
   endpoint: string | null;
   careersUrl: string | null;
   notes: string | null;
+  desire: number | null; // 1–5, how much you want them (null = untagged) — see shared/src/config/desire.ts
   titles: string[] | null;
   location: string | null;
   lastScrapedAt: string | null;
@@ -98,6 +101,7 @@ function CooldownCell({ until, onSet }: { until: string | null; onSet: (until: s
 function wlSortVal(t: Target, key: string, counts: Map<string, TargetCounts>): string | number {
   switch (key) {
     case "company": return t.name.toLowerCase();
+    case "want": return -desireSortVal(t.desire); // most-wanted first on the ascending click
     case "tier": return TIERS.indexOf(t.tier);
     case "titles": return (t.titles ?? []).join(", ").toLowerCase();
     case "fetch": return (t.fetchMethod ?? "").toLowerCase();
@@ -304,7 +308,7 @@ export default function TargetsTable({
   // free-text filter across name / tier / location / titles / ats / fetch method
   const q = filter.trim().toLowerCase();
   const filtered = (targets ?? []).filter(
-    (t) => !q || [t.name, t.tier, (t.titles ?? []).join(" "), t.ats, t.fetchMethod].filter(Boolean).join(" ").toLowerCase().includes(q)
+    (t) => !q || [t.name, t.tier, desireLabel(t.desire), (t.titles ?? []).join(" "), t.ats, t.fetchMethod].filter(Boolean).join(" ").toLowerCase().includes(q)
   );
   const shown = sort
     ? [...filtered].sort((a, b) => wlCmp(wlSortVal(a, sort.key, counts), wlSortVal(b, sort.key, counts), sort.dir))
@@ -444,7 +448,7 @@ export default function TargetsTable({
           <table className="w-full border-separate border-spacing-0 text-left" style={{ tableLayout: "fixed", minWidth: total(WL_COLS) }}>
             <thead>
               <tr>
-                {([["company", "Company"], ["tier", "Tier"], ["titles", "Target titles"], ["fetch", "Fetch"], ["scraped", "Last scraped"], ["cooldown", "Cooldown"], ["pipeline", "Pipeline"]] as const).map(([key, label]) => (
+                {([["company", "Company"], ["want", "Want"], ["tier", "Tier"], ["titles", "Target titles"], ["fetch", "Fetch"], ["scraped", "Last scraped"], ["cooldown", "Cooldown"], ["pipeline", "Pipeline"]] as const).map(([key, label]) => (
                   <ResTh
                     key={key}
                     width={widths[key]}
@@ -472,6 +476,12 @@ export default function TargetsTable({
                         <span className="block truncate font-medium text-zinc-100" title={t.name}>{t.name}{t.notes && <span className="ml-1.5 text-[12px] text-zinc-600" title={t.notes}>ⓘ</span>}</span>
                         {c && <TrackerTag items={c.items} />}
                       </div>
+                    </Td>
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <DesireSelect
+                        desire={t.desire}
+                        onDesire={(d) => update(t.name, { desire: d })}
+                      />
                     </Td>
                     <Td onClick={(e) => e.stopPropagation()}>
                       <span className="inline-flex items-center gap-1.5">

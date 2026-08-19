@@ -180,6 +180,23 @@ export function useApplications() {
     [postings, patch, loadAll]
   );
 
+  // Tag how much you want a company (1–5, null = untagged). Company-level like the watchlist flag,
+  // so it persists through the company upsert and works even before there are any postings — and it
+  // shows on every posting of that company at once.
+  const setCompanyDesire = useCallback(
+    async (company: string, desire: number | null) => {
+      pendo.track("company_desire_changed", { company, desire });
+      setPostings((all) => all.map((x) => (x.company === company ? { ...x, desire } : x)));
+      await fetch("/api/companies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companies: [{ name: company, desire }] }),
+      });
+      loadAll();
+    },
+    [loadAll]
+  );
+
   // Toggle a company on/off the discovery watchlist (what the agent auto-scans). Company-level,
   // independent of tier; persisted via the upsert endpoint (works even with no postings).
   const setWatchlist = useCallback(
@@ -218,5 +235,5 @@ export function useApplications() {
     [loadAll]
   );
 
-  return { postings, loading, activity, reload: loadAll, setStatus, moveJobToStage, setInterviewed, setCompanyTier, setWatchlist, setField, renameCompany, moveJob, deleteJob };
+  return { postings, loading, activity, reload: loadAll, setStatus, moveJobToStage, setInterviewed, setCompanyTier, setCompanyDesire, setWatchlist, setField, renameCompany, moveJob, deleteJob };
 }

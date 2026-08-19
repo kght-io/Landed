@@ -22,6 +22,7 @@ export type CompanyAgg = {
   statusCounts: Partial<Record<Status, number>>;
   skipped: boolean; // derived: you've passed on the whole company (every posting company_skipped)
   watchlist: boolean; // company is on the discovery scan list (denormalized from the company)
+  desire?: number | null; // 1–5, how much you want them (null = untagged) — denormalized from the company
 };
 
 // A company reads as skipped when it has postings and all of them are company_skipped —
@@ -51,7 +52,7 @@ export function aggregateCompanies(postings: Posting[]): CompanyAgg[] {
   for (const p of postings) {
     let g = m.get(p.company);
     if (!g) {
-      g = { company: p.company, tier: p.tier, items: [], newCount: 0, statusCounts: {}, skipped: false, watchlist: !!p.watchlist };
+      g = { company: p.company, tier: p.tier, items: [], newCount: 0, statusCounts: {}, skipped: false, watchlist: !!p.watchlist, desire: p.desire ?? null };
       m.set(p.company, g);
     }
     g.items.push(p);

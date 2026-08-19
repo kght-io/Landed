@@ -15,6 +15,7 @@ import { tailorDiffFor } from "@landed/shared/jobs/redolog";
 import { FitBadge, GapList } from "./Badges";
 import ResumeDiffModal from "@/components/ResumeDiff";
 import FitDetailModal from "@/components/FitDetail";
+import { DesireSelect } from "@/components/DesireTag";
 
 // Header chip on a tailored/assessed section with a redo in flight (the stage doesn't regress).
 function RedoChip() {
@@ -722,7 +723,7 @@ function StageRail({ current, selected, onSelect }: { current: number; selected:
 }
 
 export default function CompanyDrawer({
-  c, focusId, onClose, onSetStatus, onSetInterviewed, onTier, onEditField, onMove, onDelete, onChanged,
+  c, focusId, onClose, onSetStatus, onSetInterviewed, onTier, onDesire, onEditField, onMove, onDelete, onChanged,
 }: {
   c: CompanyAgg;
   focusId?: string | null; // when set, scope the drawer to this single job (the only mode now)
@@ -730,6 +731,7 @@ export default function CompanyDrawer({
   onSetStatus: (p: Posting, status: Status) => void;
   onSetInterviewed: (p: Posting, interviewed: boolean) => void;
   onTier: (t: Tier) => void;
+  onDesire: (d: number | null) => void;
   onToggleWatchlist: (on: boolean) => void;
   onEditField: (p: Posting, changes: Partial<Posting>) => void;
   onMove: (p: Posting, company: string) => void;
@@ -787,6 +789,7 @@ export default function CompanyDrawer({
             </span>
             <span className="text-zinc-700">·</span>
             <TierSelect tier={c.tier} onTier={onTier} />
+            <DesireSelect desire={c.desire} onDesire={onDesire} />
             {p.channel === "referral" && <Chip tone="sky">referral</Chip>}
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 text-[13px]">

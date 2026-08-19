@@ -11,6 +11,7 @@ import { parseRedoLog } from "@landed/shared/jobs/redolog";
 import { parseBriefs } from "@landed/shared/jobs/briefs";
 import { isExcludedTitle } from "@landed/shared/jobs/exclude";
 import type { Leveling } from "@landed/shared/config/leveling";
+import { coerceDesire, type Desire } from "@landed/shared/config/desire";
 import { describeChanges, type DescribedChange, type FieldDiff } from "@landed/shared/format/change";
 import type { Comment, EmailRefs, FitAssessment, InterviewKind, Interviewer, InterviewRound, Posting, RedoTurn, Status, Tier } from "@landed/shared/types";
 import type { InterviewRow } from "./schema";
@@ -75,6 +76,7 @@ function toPosting(a: PostingRow, c: CompanyRow, rounds?: InterviewRound[]): Pos
     company: c.name,
     tier: c.tier as Tier,
     watchlist: !!c.watchlist,
+    desire: c.desire,
     cooldownUntil: c.cooldownUntil,
     role: a.title ?? "—",
     location: a.location ?? undefined,
@@ -481,6 +483,7 @@ export type CompanyInput = {
   location?: string | null; // → target_location
   leveling?: Leveling | null; // → leveling (JSON): the company's levels.fyi ladder, Amazon-anchored
   notes?: string | null;
+  desire?: Desire | number | null; // 1–5, how much you want them; null clears the tag
   lastScrapedAt?: string | null; // ISO; usually auto-stamped on discovery, but settable here too
   cooldownUntil?: string | null; // YYYY-MM-DD; discovery skips this company until then. null clears it.
 };
@@ -511,6 +514,9 @@ export function upsertCompanies(
     if (t.endpoint !== undefined) patch.endpoint = t.endpoint;
     if (t.careersUrl !== undefined) patch.careersUrl = t.careersUrl;
     if (t.notes !== undefined) patch.notes = t.notes;
+    // Coerced, never trusted: a `<select>` sends strings and the agent sends anything. Out of range
+    // clamps into the scale; anything non-numeric untags rather than landing junk in the column.
+    if (t.desire !== undefined) patch.desire = coerceDesire(t.desire);
     if (t.titles !== undefined) patch.targetTitles = t.titles ? JSON.stringify(t.titles) : null;
     if (t.location !== undefined) patch.targetLocation = t.location;
     if (t.leveling !== undefined) patch.leveling = t.leveling ? JSON.stringify(t.leveling) : null;

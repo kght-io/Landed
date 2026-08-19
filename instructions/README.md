@@ -273,6 +273,8 @@ Read this live from the **`jobhunt` MCP tools** — no files to open, always cur
 > **Three separate concerns:**
 > - **Company records** (tier + scrape config, plus `cooldownUntil`) — curate with
 >   `upsertCompanies` (matched by company name; only the fields you pass change). `tier` is just a tag.
+>   The company's `desire` field (1–5, how much **the candidate** wants them) is theirs alone — read it
+>   if it helps you prioritize, but never set or change it, even if asked to infer one.
 > - **The watchlist** (what the scan checks) — manage with `addToWatchlist` / `removeFromWatchlist`.
 >   Scanning is expensive, so this is an explicit, curated list, independent of tier.
 > - **Leveling** (the IC SWE ladder the fit view draws against the reference) — its own lazy

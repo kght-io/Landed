@@ -183,6 +183,7 @@ export type Posting = {
   company: string;
   tier: Tier;
   watchlist?: boolean; // company is on the discovery watchlist (auto-scanned) — denormalized from the company
+  desire?: number | null; // 1–5, how much you want the company (null = untagged) — denormalized from the company
   cooldownUntil?: string | null; // company is skipped by discovery until this date — denormalized from the company
   role: string;
   location?: string;

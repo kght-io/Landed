@@ -22,6 +22,10 @@ export const companies = sqliteTable("companies", {
   // or the JD. Only needed when fetchMethod isn't `api`. Distinct from freeform `notes`.
   fetchRecipe: text("fetch_recipe"),
   notes: text("notes"),
+  // How much YOU want this company, 1–5 (null = untagged). Yours alone — the agent never sets it and
+  // nothing in the pipeline branches on it. Orthogonal to `tier`, which is the operational grouping.
+  // See shared/src/config/desire.ts for the scale.
+  desire: integer("desire"),
   // Scrape config + search criteria for a target (the agent curates these via upsertCompanies).
   slug: text("slug"), // ATS board slug, e.g. "anthropic" for greenhouse/ashby
   endpoint: text("endpoint"), // scrape API endpoint (or a "(verify XHR)" hint)

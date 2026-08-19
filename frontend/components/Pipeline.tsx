@@ -327,7 +327,7 @@ for (const s of ALL_STEPS) for (const st of s.states) STATE_STAGE[st] = s.key;
 
 export default function Pipeline() {
   const {
-    postings, loading, reload, setStatus, setInterviewed, setCompanyTier,
+    postings, loading, reload, setStatus, setInterviewed, setCompanyTier, setCompanyDesire,
     setWatchlist, setField, renameCompany, moveJob, deleteJob,
   } = useApplications();
   const { jobs, add, bump, redoNoteFor, isWorking, isQueued, inboxLastSynced } = useAgentQueue();
@@ -1025,7 +1025,7 @@ export default function Pipeline() {
 
   // A one-item company aggregate for the drawer (it renders just the focused posting now).
   const scanAgg: CompanyAgg | null = scanPosting
-    ? { company: scanPosting.company, tier: scanPosting.tier, items: [scanPosting], newCount: 0, statusCounts: {}, skipped: false, watchlist: !!scanPosting.watchlist }
+    ? { company: scanPosting.company, tier: scanPosting.tier, items: [scanPosting], newCount: 0, statusCounts: {}, skipped: false, watchlist: !!scanPosting.watchlist, desire: scanPosting.desire ?? null }
     : null;
 
   return (
@@ -1253,6 +1253,7 @@ export default function Pipeline() {
           onSetStatus={setStatusGuarded}
           onSetInterviewed={setInterviewed}
           onTier={(tier) => setCompanyTier(companyGroup.company, tier)}
+          onDesire={(d) => setCompanyDesire(companyGroup.company, d)}
           onToggleWatchlist={(on) => setWatchlist(companyGroup.company, on)}
           onEditField={setField}
           onChanged={reload}
@@ -1291,6 +1292,7 @@ export default function Pipeline() {
           }}
           onSetInterviewed={(p, on) => scanEdit(p.id, { interviewed: on })}
           onTier={(tier) => scanEdit(scanPosting.id, { tier })}
+          onDesire={(d) => setCompanyDesire(scanPosting.company, d)}
           onToggleWatchlist={(on) => { setWatchlist(scanPosting.company, on); setScanPosting((cur) => (cur ? { ...cur, watchlist: on } : cur)); }}
           onEditField={(p, changes) => scanEdit(p.id, changes)}
           onChanged={refreshScan}

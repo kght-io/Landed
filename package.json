@@ -18,7 +18,7 @@
     "start": "npm run start --workspace @landed/frontend",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "boundary": "depcruise --config .dependency-cruiser-boundary.cjs frontend backend shared mcp",
+    "boundary": "depcruise --config .dependency-cruiser-boundary.cjs frontend backend shared mcp desktop",
     "seed:prep": "tsx scripts/seed-prep.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "prep:export": "node --env-file-if-exists=.env --import tsx scripts/export-prep-context.ts",

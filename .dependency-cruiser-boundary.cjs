@@ -6,11 +6,17 @@
  * modules into folder boxes and filters the graph down to our own source, both of which make
  * these rules unable to fire. Rules need the full, uncollapsed graph — node builtins included.
  *
- * The four invariants:
+ * The invariants:
  *   backend -/-> frontend   the backend never reaches into the frontend
  *   shared -/-> backend     (at runtime — type-only imports are erased, so they're allowed)
  *   shared -/-> node        shared ships to the browser
+ *   frontend -/-> desktop   the web app never depends on the Electron app
+ *   desktop -/-> backend    the desktop app talks HTTP, never opens the DB
  *   no import cycles        every module can be read, tested, and moved on its own
+ *
+ * Note what is NOT forbidden: desktop -> frontend. The desktop renderer deliberately imports the
+ * web app's agent components so the two cannot drift, and that is the ONE direction allowed across
+ * that pair — which is exactly why the reverse is a rule.
  */
 module.exports = {
   forbidden: [
@@ -47,6 +53,27 @@ module.exports = {
         "a couple of shared modules are typed against drizzle-inferred row types (PostingRow) that " +
         "can only be declared next to the schema.",
       from: { path: "^shared" },
+      to: { path: "^backend", dependencyTypesNot: ["type-only"] },
+    },
+    {
+      name: "frontend-not-to-desktop",
+      severity: "error",
+      comment:
+        "The desktop app imports the web app's agent components on purpose — that reuse is what " +
+        "keeps one agents UI instead of two. The reverse would make the web app unbuildable " +
+        "without Electron, and that is not a trade anyone would make deliberately.",
+      from: { path: "^frontend" },
+      to: { path: "^desktop/" },
+    },
+    {
+      name: "desktop-not-to-backend",
+      severity: "error",
+      comment:
+        "The desktop app runs on the user's machine and the database does not — it lives wherever " +
+        "the app is deployed. Reaching into backend/ would pull in better-sqlite3 and imply a " +
+        "local DB that is not there. Everything data-shaped goes over HTTP, through main's fetch " +
+        "proxy or an MCP tool. Type-only imports are exempt, as with shared.",
+      from: { path: "^desktop" },
       to: { path: "^backend", dependencyTypesNot: ["type-only"] },
     },
     {

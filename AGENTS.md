@@ -27,7 +27,7 @@ Local-first job-search command center. **One SQLite DB is the source of truth**
 (`data/jobhunt.db`), edited by two actors — **You** (human, via the UI) and **CoWork** (the
 agent, via MCP) — and every change is attributed to one of them.
 
-The repo is an **npm-workspaces monorepo** of four flat workspaces: the frontend and the backend are
+The repo is an **npm-workspaces monorepo** of five flat workspaces: the frontend and the backend are
 separate packages that happen to run in one process (`next dev`). Which workspace a file belongs in
 is not cosmetic — it is enforced (see "The workspace boundary" below).
 
@@ -36,6 +36,7 @@ frontend/   Next.js — pages, components, hooks, and the /api route handlers
 backend/    server-only — DB, job queue, agent orchestration, on-disk paths
 shared/     client-safe — domain types, pure logic, formatting (browser-safe)
 mcp/        the stdio MCP server (zero-dep; a thin HTTP client over frontend)
+desktop/    the Electron app — runs the agent on the user's machine (see below)
 
 data/  instructions/  scripts/  tests/    (repo-root, shared by every workspace)
 ```
@@ -49,6 +50,12 @@ data/  instructions/  scripts/  tests/    (repo-root, shared by every workspace)
   `store.ts` is the core; `registry.ts` maps agent result records onto postings/companies.
 - **Agent surface** — [mcp/jobhunt-server.mjs](mcp/jobhunt-server.mjs) exposes MCP tools; CoWork is
   briefed by `INSTRUCTIONS_ROOT/README.md` (defaults to `./instructions`; see the sync rule above).
+- **Desktop app** — [desktop/](desktop/) is where the agent actually runs. A supervisor long-polls
+  `/api/jobs/wait`, spawns `claude` on the user's own subscription scoped to the folder they picked,
+  and streams the transcript into a window. It exists for the one thing nothing else can do: drain
+  the queue while nobody is watching. It ships a SECOND MCP server (`landed-local`) for the
+  machine's own files — `mcp/jobhunt-server.mjs` stays a pure HTTP client and knows nothing about
+  disks. `npm run desktop` runs it; `npm run desktop:package` builds a DMG.
 - **On-disk paths** — anchor them on `REPO_ROOT`
   ([backend/src/paths.ts](backend/src/paths.ts)), never `process.cwd()`. npm runs a
   workspace script with cwd set to the *package*, so `next dev` reports cwd = `frontend`; a
@@ -60,7 +67,7 @@ data/  instructions/  scripts/  tests/    (repo-root, shared by every workspace)
 
 # The workspace boundary
 
-Three invariants, enforced by `npm run boundary` (part of `npm run check`), configured in
+Five invariants, enforced by `npm run boundary` (part of `npm run check`), configured in
 [.dependency-cruiser-boundary.cjs](.dependency-cruiser-boundary.cjs):
 
 | Rule | Meaning |
@@ -68,10 +75,19 @@ Three invariants, enforced by `npm run boundary` (part of `npm run check`), conf
 | `backend -/-> frontend` | the backend never reaches into the frontend |
 | `shared -/-> backend` | at **runtime**; type-only imports are exempt (TypeScript erases them) |
 | `shared -/-> node builtins` | `shared` ships to the browser |
+| `frontend -/-> desktop` | the web app must build without Electron |
+| `desktop -/-> backend` | at **runtime**; the desktop app talks HTTP, never opens the DB |
+
+**`desktop -> frontend` is deliberately allowed, and it is the only direction across that pair.**
+The Electron renderer imports the web app's agent components (`AgentsView` and everything under it)
+so there is one agents UI rather than two that drift; a build-time alias swaps only the chat
+provider, whose web version tails SSE and whose desktop version reads an IPC transcript. That is why
+the reverse is a rule: reuse in one direction is sharing, in both it is a knot.
 
 Picking a package for new code: does it touch the DB, the filesystem, or a node builtin? →
 `backend`. Is it a type, pure logic, or formatting the UI also needs? → `shared`.
-Is it a page, component, or route handler? → `frontend`. Route handlers are the seam: they are the
+Is it a page, component, or route handler? → `frontend`. Does it run on the user's own machine —
+spawning the agent, touching their files? → `desktop`. Route handlers are the seam: they are the
 only place that imports `@landed/backend` and turns it into HTTP.
 
 Imports use the package name across a boundary (`@landed/backend/db`, `@landed/shared/types`) and a

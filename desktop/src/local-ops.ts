@@ -55,14 +55,3 @@ export function revealPrepFolder(slug: string): void {
   if (!dir || !fs.existsSync(dir)) return;
   shell.openPath(dir);
 }
-
-/** The resolved roots, for the settings page. Instructions ship inside the app, not the folder. */
-export function getPaths(): { assetRoot: string; instructionsRoot: string } {
-  return { assetRoot: getAssetRoot(), instructionsRoot: path.join(process.resourcesPath ?? "", "instructions") };
-}
-
-/** Absolute path of the base résumé PDF, or null when it has not been uploaded yet. */
-export function baseResumePath(): string | null {
-  const p = within("resume", "resume-ref.pdf");
-  return p && fs.existsSync(p) ? p : null;
-}

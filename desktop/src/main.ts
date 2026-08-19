@@ -1,70 +1,31 @@
-import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
-import { APP_ORIGIN, ensureAssetRoot } from "./config";
-import { baseResumePath, getPaths, revealAssetFolder, revealPrepFolder, revealResumeFolder, within } from "./local-ops";
+import { APP_ORIGIN, ensureAssetRoot, getAssetRoot } from "./config";
+import { listDir, resolveWithin } from "./browse";
 import { parseDeepLink } from "./deeplink";
+import { revealAssetFolder, revealPrepFolder, revealResumeFolder } from "./local-ops";
 
-// THE SHELL. A window onto the app — which runs on localhost today and in the cloud later — plus
-// the handful of capabilities a browser cannot offer on files that live on this machine.
+// THE DESKTOP APP.
 //
-// The security posture follows from one fact: the renderer loads a REMOTE origin. Anything the page
-// can reach, an attacker who can influence that page can reach. Hence no node integration, context
-// isolation on, a sandboxed renderer, a preload that exposes named functions rather than a channel,
-// and an origin check on every handler below.
+// It is NOT the app's UI — the browser owns that, and always will. This process owns the two things
+// a browser cannot do: run Claude Code on the user's own subscription, and touch the folder the
+// user's résumés live in. Its window shows exactly those: agent runs, and a browser for that folder.
+//
+// Because the window renders our own local files rather than a remote origin, the threat model is
+// the ordinary one for a desktop app — the renderer is still isolated and sandboxed, but the
+// hostile-page concerns that shaped an earlier draft do not apply here. What DOES arrive from
+// outside is `landed://` deep links, and those are gated in deeplink.ts.
 
-// Must be declared before `ready`, or the scheme is registered too late to be treated as secure.
-protocol.registerSchemesAsPrivileged([
-  { scheme: "landed-file", privileges: { standard: true, secure: true, supportFetchAPI: true } },
-]);
-
-// `landed://` is how the browser reaches this app: the OS routes the URL, so the web page needs no
-// port, no CORS grant, and no exception to mixed-content rules. Registered here rather than at
-// install time so a dev run claims the scheme too.
+// Deep links are how the browser reaches this app: the OS routes the URL, so the web page needs no
+// port, no CORS grant, and no mixed-content exception.
 app.setAsDefaultProtocolClient("landed");
 
-// One instance owns the scheme. Without the lock, a second launch (which is what Windows and Linux
-// do to deliver a deep link) would start a rival process holding a rival asset root.
+// One instance owns the scheme. Without the lock, a second launch — which is how Windows and Linux
+// deliver a deep link — would start a rival process holding a rival asset root.
 if (!app.requestSingleInstanceLock()) app.quit();
 
-// Deep links arrive three ways, and all three funnel here: macOS `open-url` while running, a
-// second launch carrying the URL in argv on Windows/Linux, and a COLD start where the URL is in
-// this process's own argv. Missing the cold-start case is the classic bug — the app opens and
-// nothing happens, once, only on the first click.
-let pendingLink: string | null = null;
-
-function runDeepLink(raw: string): void {
-  const link = parseDeepLink(raw);
-  if (!link) return; // unparseable or not ours — silence, not an error dialog
-  if (link.action === "reveal") {
-    const t = link.target;
-    if (t.kind === "assets") revealAssetFolder();
-    else if (t.kind === "resume") revealResumeFolder(t.slug);
-    else revealPrepFolder(t.slug);
-    return;
-  }
-  focusWindow(); // "agent" — bring the app forward; the view itself is still to come
-}
-
-/** Queue a link if the asset root is not chosen yet, so a cold-start click is not dropped. */
-function handleDeepLink(raw: string): void {
-  if (!app.isReady() || !rootReady) pendingLink = raw;
-  else runDeepLink(raw);
-}
-
-const linkInArgv = (argv: string[]): string | undefined => argv.find((a) => a.startsWith("landed://"));
-
-app.on("open-url", (event, url) => {
-  event.preventDefault();
-  handleDeepLink(url);
-});
-
-app.on("second-instance", (_event, argv) => {
-  const url = linkInArgv(argv);
-  if (url) handleDeepLink(url);
-  else focusWindow();
-});
-
 let rootReady = false;
+let pendingLink: string | null = null;
 
 function focusWindow(): void {
   const [win] = BrowserWindow.getAllWindows();
@@ -73,46 +34,48 @@ function focusWindow(): void {
   win.focus();
 }
 
-/**
- * Reject IPC from anywhere but the app we loaded.
- *
- * A window that has navigated elsewhere — a redirect, an OAuth hop, an injected iframe — is not the
- * app, and must not be able to ask this process to touch the user's disk. Checked per call rather
- * than once at startup, because navigation happens after startup.
- */
-function fromApp(event: Electron.IpcMainInvokeEvent): boolean {
-  const url = event.senderFrame?.url;
-  if (!url) return false;
-  try {
-    return new URL(url).origin === new URL(APP_ORIGIN).origin;
-  } catch {
-    return false;
+function runDeepLink(raw: string): void {
+  const link = parseDeepLink(raw);
+  if (!link) return; // unparseable or not ours — silence beats an error dialog for a stray click
+  if (link.action === "reveal") {
+    const t = link.target;
+    if (t.kind === "assets") revealAssetFolder();
+    else if (t.kind === "resume") revealResumeFolder(t.slug);
+    else revealPrepFolder(t.slug);
+    return;
   }
+  focusWindow(); // "agent" — the runs view lives in this window
 }
 
-const handle = (channel: string, run: (...args: never[]) => unknown) =>
-  ipcMain.handle(channel, (event, ...args) => {
-    if (!fromApp(event)) return undefined; // silence, not an error: the caller is not the app
-    return run(...(args as never[]));
-  });
+/** Queue a link until there is a root to resolve it against, so a cold-start click is not dropped. */
+function handleDeepLink(raw: string): void {
+  if (rootReady) runDeepLink(raw);
+  else pendingLink = raw;
+}
 
-// Shown when the app cannot be reached. The whole UI is remote, so without this the window is blank
-// and the user has no way to tell "server down" from "app broken".
-const offlinePage = (origin: string) => `data:text/html,${encodeURIComponent(`
-<style>body{background:#09090b;color:#a1a1aa;font:14px/1.6 -apple-system,system-ui,sans-serif;
-display:grid;place-content:center;height:100vh;margin:0;text-align:center;gap:12px}
-code{color:#e4e4e7}button{background:#27272a;color:#e4e4e7;border:1px solid #3f3f46;border-radius:8px;
-padding:6px 14px;font:inherit;cursor:pointer}</style>
-<div><h2 style="color:#e4e4e7;font-weight:500;margin:0 0 4px">Can't reach Landed</h2>
-<p style="margin:0 0 14px">Nothing is running at <code>${origin}</code>.</p>
-<button onclick="location.reload()">Try again</button></div>`)}`;
+const linkInArgv = (argv: string[]): string | undefined => argv.find((a) => a.startsWith("landed://"));
 
-function createWindow() {
+// Deep links arrive three ways and all three funnel through handleDeepLink: macOS `open-url` while
+// running, a second launch carrying the URL in argv on Windows/Linux, and a COLD start where the
+// URL is in this process's own argv. Missing the cold-start case is the classic bug — the app
+// opens and nothing happens, once, on the very first click after install.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+app.on("second-instance", (_event, argv) => {
+  const url = linkInArgv(argv);
+  if (url) handleDeepLink(url);
+  else focusWindow();
+});
+
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    backgroundColor: "#09090b", // matches the app's dark shell, so launch has no white flash
+    width: 1100,
+    height: 760,
+    backgroundColor: "#09090b",
     show: false,
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -120,53 +83,55 @@ function createWindow() {
       sandbox: true,
     },
   });
-
   win.once("ready-to-show", () => win.show());
-  win.webContents.on("did-fail-load", (_e, _code, _desc, failedUrl, isMainFrame) => {
-    if (isMainFrame && !failedUrl.startsWith("data:")) void win.loadURL(offlinePage(APP_ORIGIN));
-  });
-
-  // Links that leave the app open in the real browser rather than trapping the user in a window
-  // with no address bar and no back button.
+  // Nothing in this window should navigate anywhere. External links open in the real browser, where
+  // the user has their session, their tabs, and an address bar.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith("landed-file://")) void shell.openExternal(url);
+    void shell.openExternal(url);
     return { action: "deny" };
   });
-
-  void win.loadURL(APP_ORIGIN);
+  void win.loadFile(path.join(__dirname, "renderer", "index.html"));
   return win;
 }
 
 app.whenReady().then(async () => {
-  // The folder question comes before the window: every local capability is defined relative to the
-  // answer, and a window that opened first would be able to ask for files with no root to resolve.
+  // The folder question comes before the window: every capability here is defined relative to the
+  // answer, and a window that opened first could ask for files with no root to resolve them against.
   const root = await ensureAssetRoot();
   if (!root) {
     app.quit();
     return;
   }
 
-  // Serves files out of the chosen folder to the page. The path is rebuilt through within() rather
-  // than trusted, so a URL is not a way to read the disk.
-  protocol.handle("landed-file", (request) => {
-    const rel = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, "");
-    const file = rel === "resume/resume-ref.pdf" ? baseResumePath() : within(rel);
-    if (!file) return new Response("forbidden", { status: 403 });
-    return net.fetch(`file://${file}`);
+  ipcMain.handle("browse:root", () => getAssetRoot());
+  ipcMain.handle("browse:list", (_e, rel: string) => listDir(getAssetRoot(), typeof rel === "string" ? rel : ""));
+  ipcMain.handle("browse:open", (_e, rel: string) => {
+    const target = resolveWithin(getAssetRoot(), typeof rel === "string" ? rel : "");
+    if (target) void shell.openPath(target);
   });
-
-  handle("landed:revealAssetFolder", () => revealAssetFolder());
-  handle("landed:revealResumeFolder", (slug: string) => revealResumeFolder(slug));
-  handle("landed:getPaths", () => getPaths());
+  ipcMain.handle("browse:reveal", (_e, rel: string) => {
+    const target = resolveWithin(getAssetRoot(), typeof rel === "string" ? rel : "");
+    if (target) shell.showItemInFolder(target);
+  });
+  ipcMain.handle("app:openInBrowser", () => shell.openExternal(APP_ORIGIN));
+  ipcMain.handle("app:origin", () => APP_ORIGIN);
+  ipcMain.handle("app:chooseRoot", async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: "Choose your Landed folder",
+      properties: ["openDirectory", "createDirectory"],
+      buttonLabel: "Use this folder",
+    });
+    return canceled ? null : filePaths[0];
+  });
 
   rootReady = true;
   createWindow();
 
-  // Drain anything that arrived before there was a root to resolve it against — including the link
-  // that launched this process in the first place.
+  // Drain anything that arrived before there was a root — including the link that launched us.
   const cold = pendingLink ?? linkInArgv(process.argv);
   pendingLink = null;
   if (cold) runDeepLink(cold);
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

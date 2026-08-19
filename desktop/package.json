@@ -2,10 +2,10 @@
   "name": "@landed/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "The Electron shell. A window onto the app (wherever it runs) plus the capabilities a browser cannot offer: revealing folders and reading files on the machine the résumés actually live on.",
+  "description": "The Electron shell. A window onto the app (wherever it runs) plus the capabilities a browser cannot offer: revealing folders and reading files on the machine the r\u00e9sum\u00e9s actually live on.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p .",
+    "build": "tsc -p . && node -e \"require('fs').cpSync('src/renderer','dist/renderer',{recursive:true})\"",
     "start": "npm run build && electron ."
   },
   "devDependencies": {

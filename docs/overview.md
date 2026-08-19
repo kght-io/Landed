@@ -11,29 +11,55 @@ meant* — which is the more interesting bug.
 
 ---
 
-## Three processes, in a ring
+## Where the work happens
+
+Two machines, and the split is the whole design. **The app and its database live wherever they are
+deployed. The agent runs on the user's own machine.** That is not an accident of history — it is the
+one thing a hosted service cannot do, because running a job at 3am on somebody's Claude subscription
+requires a process they installed.
 
 ```mermaid
 flowchart LR
-  subgraph app["one process — next dev, always on via launchd :3000"]
+  subgraph cloud["the app — next, always on"]
     fe["frontend/<br/>components + /api routes"]
     be["backend/<br/>db · jobs · agents"]
     fe --> be
   end
   db[("data/jobhunt.db")]
-  cli["claude CLI<br/>(spawned per run, detached)"]
-  mcp["mcp/jobhunt-server.mjs<br/>(stdio, one per session)"]
+
+  subgraph machine["the user's machine"]
+    app["desktop/<br/>Electron: supervisor + window"]
+    cli["claude CLI<br/>(spawned per drain)"]
+    jh["mcp/jobhunt-server.mjs<br/>(stdio)"]
+    loc["desktop/mcp-local<br/>(stdio)"]
+    files[("~/their folder<br/>résumés · prep")]
+  end
+
+  browser["browser"]
 
   be --> db
-  be -- "spawn" --> cli
-  cli -- "spawn (stdio)" --> mcp
-  mcp -- "HTTP localhost:3000" --> fe
+  browser -- "HTTPS /api" --> fe
+  app -- "long-poll /api/jobs/wait" --> fe
+  app -- "spawn" --> cli
+  cli -- "stdio" --> jh
+  cli -- "stdio" --> loc
+  jh -- "HTTP /api" --> fe
+  loc --> files
 ```
 
-The ring is the surprising part: **the app spawns the agent, the agent spawns an MCP server, and the
-MCP server calls back into the app over HTTP.** CoWork never touches the database — every action it
-takes is a round-trip through the app's own route handlers, which is why those routes are the
-security and validation boundary rather than an afterthought.
+The ring is still the surprising part: **the agent's data access is a round-trip back through the
+app's own route handlers.** CoWork never touches the database — which is why those routes are the
+security and validation boundary rather than an afterthought, and why the whole thing survived the
+database moving to another machine without the agent noticing.
+
+**Two MCP servers, because they answer to different places.** `jobhunt` is a pure HTTP client and
+follows its URL to wherever the app is deployed; `landed-local` is pinned to the machine, because
+résumés are files and files do not move. One server cannot be in both places, and merging them would
+mean the tool surface deciding per call which world it is in.
+
+**The queue is the only coupling between browser and desktop.** One writes a row, the other
+long-polls for it. Neither can address the other, which is why closing the app breaks nothing and
+why the desktop app works on a plane.
 
 The MCP hop buys three things a bare `curl` from the agent's Bash tool would not: typed tool schemas
 the model can actually discover, the `x-jobhunt-thread` header stamped on every call (the heartbeat
@@ -63,6 +89,10 @@ it.
 | `shared/mcp/tool-schemas.mjs` | The tool contract — 23 tools, CoWork's entire API surface | Plain `.mjs` so the zero-dep MCP server can import it; a direct-API chat layer sends the same schemas |
 | `mcp/jobhunt-server.mjs` | The stdio transport + one HTTP runner per tool | Zero-dependency, hand-rolled JSON-RPC |
 | `instructions/` | The playbooks: CoWork's behaviour, in markdown, in git | Consumed by a live agent — keep in sync |
+| `desktop/supervisor.ts` | The drain loop — the reason this app exists at all | Long-poll, spawn, one run per type, outlive a crashing agent |
+| `desktop/agent.ts` | Spawning `claude` scoped to the user's folder, and its MCP config | Deletes `ANTHROPIC_API_KEY` — the whole BYO-subscription model is that one line |
+| `desktop/local-tools.ts` | `readBaseResumeText`, `buildTailoredResume` | Replaced `npm run tailor:docx`, which is what let the agent's cwd stop being this repo |
+| `desktop/renderer/` | React — imports the web app's `AgentsView` rather than restating it | A build alias swaps only the chat provider: SSE on the web, IPC here |
 | `shared/` | Types, personas, coercion, formatting, the lease rule | Zero deps, browser-safe by contract |
 
 ---
@@ -105,16 +135,20 @@ resets it (so a hand requeue genuinely retries).
 
 ## Where state actually lives
 
-"One SQLite DB is the source of truth" is the design, but six places hold state:
+"One SQLite DB is the source of truth" is the design, and it still is — but state lives on two
+machines now, and which one matters more than the list:
 
 | Where | What | Durability |
 |---|---|---|
-| `data/jobhunt.db` | The source of truth — 20 tables | Backed up with the repo's data dir |
-| `data/agent-jobs/*.jsonl` `.pid` `.err` | Per-type agent run journals | Overwritten each launch |
-| `data/claude-code.mcp.json` | Generated MCP wiring for the CLI | Regenerated on demand |
-| `ASSET_ROOT` | Résumés, prep folders | Cloud-synced — the one that corrupts in-place writes |
+| `data/jobhunt.db` | The source of truth — 20 tables | Wherever the app is deployed |
+| `ASSET_ROOT` (the user's chosen folder) | Résumés, tailored .docx/.pdf, prep material | **The user's machine.** Often cloud-synced — the one that corrupts in-place writes, hence write-and-rename |
+| Electron `userData` | The chosen folder, the pause flag, the generated MCP config | The user's machine; survives restarts |
+| Agent transcripts | What a run said and did | Held in the desktop app's main process, bounded; never leaves the machine |
+| `data/agent-jobs/*.jsonl` `.pid` `.err` | The **web** app's own run journals | Overwritten each launch; only used by the routes the desktop app replaces |
 | `instructions/` | Playbooks | In git |
-| `localStorage` | Chat transcripts | Browser-only; nothing server-side |
+
+The line worth remembering: **artifacts stay files on the user's machine, knowledge goes to the
+database.** That is what lets the DB move to another continent without the résumés following it.
 
 ---
 
@@ -125,8 +159,15 @@ resets it (so a hand requeue genuinely retries).
 - `backend -/-> frontend` — the backend never reaches into the UI
 - `shared -/-> backend` at runtime — `shared` ships to the browser (type-only imports are exempt)
 - `shared -/-> node builtins` — same reason
+- `frontend -/-> desktop` — the web app must build without Electron
+- `desktop -/-> backend` at runtime — the database is not on the user's machine; everything
+  data-shaped goes over HTTP
 - **no import cycles** — `db`, `jobs`, and `agents` were a ring until the stage-change event
   inverted the last edge
+
+`desktop -> frontend` is deliberately **allowed**, and is the only direction across that pair: the
+Electron renderer imports the web app's agent components so there is one agents UI rather than two
+that drift. Reuse in one direction is sharing; in both it is a knot.
 
 Route handlers are the only place that imports `@landed/backend` and turns it into HTTP. That is the
 seam: keep them thin, and keep decisions on the backend side of it.

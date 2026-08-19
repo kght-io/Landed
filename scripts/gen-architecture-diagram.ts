@@ -12,7 +12,7 @@ import { fromRoot, writeDiagramDoc } from "./diagram-doc";
 
 const mermaid = execFileSync(
   "npx",
-  ["depcruise", "frontend", "backend", "shared", "mcp", "--config", ".dependency-cruiser.cjs", "--output-type", "mermaid"],
+  ["depcruise", "frontend", "backend", "shared", "mcp", "desktop", "--config", ".dependency-cruiser.cjs", "--output-type", "mermaid"],
   { cwd: fromRoot(), encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
 );
 
@@ -22,7 +22,7 @@ writeDiagramDoc({
   source: "Run `npm run diagram:arch` to regenerate. Source of truth: the import graph itself.",
   intro:
     'High-level module dependency graph, collapsed to one box per workspace sub-folder\n' +
-    '(`frontend/*`, `backend/src/*`, `shared/src/*`). An arrow means "imports from".\n\n' +
+    '(`frontend/*`, `backend/src/*`, `shared/src/*`, `desktop/src/*`). An arrow means "imports from".\n\n' +
     'This is generated from the real import graph, so it is always correct and hard to read — use it\n' +
     'to spot structural drift in a diff. For orientation, read the hand-written\n' +
     '[overview](overview.md) instead.',

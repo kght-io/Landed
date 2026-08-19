@@ -22,7 +22,7 @@ import {
   type ClosedFilter as ClosedFilterState,
 } from "@landed/shared/pipeline/closed-filter";
 import { ResTh } from "@/components/ResizableTable";
-import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, stepCount, type SpineStep } from "@landed/shared/pipeline/discovery";
+import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, ALL_STEPS, DEFAULT_STEP, resolveStep, stepStatesFor as stepStates, stepCount, type SpineStep } from "@landed/shared/pipeline/discovery";
 import type { Comment, Posting, FitAssessment, RedoTurn, Status } from "@landed/shared/types";
 import { JobStatusChip, type WorkStatus } from "@/components/JobStatus";
 import { ago, fmtTs } from "@landed/shared/format/time";
@@ -316,9 +316,10 @@ function cmp(a: string | number, b: string | number, dir: SortDir): number {
   return dir === "asc" ? d : -d;
 }
 
-const ALL_STEPS = [...SPINE, ...ARCHIVE];
 const FILTER_KEY = "pipeline:filter"; // localStorage key for the committed filter chips
-const stepStates = (key: string): string[] => ALL_STEPS.find((s) => s.key === key)?.states ?? [key];
+// localStorage key for the active step. JSON-encoded (usePersistentState) — the pre-2026-08 raw
+// string is unparseable and falls back to the default step once, then re-saves on the next pick.
+const STEP_KEY = "landed.pipeline.step";
 // Reverse index: a candidate/tracker state → the spine step it lives under. Lets the "Move to" menu
 // hide the stage a row already sits in, so the menu only offers real jumps.
 const STATE_STAGE: Record<string, string> = {};
@@ -457,9 +458,12 @@ export default function Pipeline() {
   // review, tailoring → assessed), so the funnel must re-read to move that row out of its stage.
   const jobKey = jobs.map((j) => j.id).sort().join(",");
 
-  // Active spine step + its table state. Persisted so a refresh keeps you on the same step (start
-  // from the default for a clean SSR/first render, then restore the saved step after mount).
-  const [tab, setTab] = useState("fit");
+  // Active spine step + its table state. Persisted so a refresh — or leaving for another page and
+  // coming back — keeps you on the same step. Read as an external store, so the FIRST client render
+  // already has the persisted step: restoring it in a mount effect instead made the page load the
+  // default step's rows and then render that response under the restored step.
+  const [storedStep, setStoredStep] = usePersistentState<string>(STEP_KEY, DEFAULT_STEP);
+  const tab = useMemo(() => resolveStep(storedStep), [storedStep]); // a step that no longer exists (or a corrupt value) → default
   // Bulk selection: the set of selected row ids (checkbox column). Cleared whenever the step changes
   // so a selection never leaks across stages. The bulk-action bar (bottom-center) appears when non-empty.
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -474,22 +478,7 @@ export default function Pipeline() {
     return n;
   }), []);
   const clearSel = useCallback(() => setSelected(new Set()), []);
-  // Restore the persisted active step on mount. Start from the default for a clean SSR/first render,
-  // then restore after mount (avoids a hydration mismatch). The filter chips restore similarly,
-  // just below — after their state is declared.
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem("pipeline:step");
-      // Hydration-safe rehydrate: SSR/first render uses the default step, then we restore the persisted
-      // step after mount (avoids a mismatch).
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (v && ALL_STEPS.some((s) => s.key === v)) setTab(v);
-    } catch { /* ignore */ }
-  }, []);
-  const pickStep = (key: string) => {
-    setTab(key);
-    try { localStorage.setItem("pipeline:step", key); } catch { /* ignore */ }
-  };
+  const pickStep = (key: string) => setStoredStep(key);
   // Filter tags (committed chips) + the in-progress draft. The effective filter is tags + draft (OR),
   // applied across ALL stages: it filters the active table AND drives the spine's filtered counts.
   // The committed chips persist (FILTER_KEY); the live draft is transient.
@@ -527,6 +516,7 @@ export default function Pipeline() {
   const termKey = terms.join("");
   const filtering = terms.length > 0;
   const [scanRows, setScanRows] = useState<Scanned[] | null>(null);
+  const rowsReq = useRef(0); // sequence number of the in-flight rows fetch — see loadRows
   const [bucketCounts, setBucketCounts] = useState<Record<string, number> | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [sort, setSort] = useState<Sort | null>(null);
@@ -580,8 +570,14 @@ export default function Pipeline() {
 
   const loadRows = useCallback(() => {
     // Tracker steps read `postings`; the Scan Watchlist step shows watchlist + settings (no table).
-    if (isTrackerStep(tab)) { setScanRows([]); return; }
-    fetch(`/api/scanned?state=${stepStates(tab).join(",")}`).then((r) => r.json()).then((d) => setScanRows(d.postings ?? [])).catch(() => setScanRows([]));
+    if (isTrackerStep(tab)) { rowsReq.current++; setScanRows([]); return; }
+    // Only the LATEST request may write the table: stepping through stages faster than the fetches
+    // come back would otherwise leave one stage's rows under another's heading.
+    const req = ++rowsReq.current;
+    fetch(`/api/scanned?state=${stepStates(tab).join(",")}`)
+      .then((r) => r.json())
+      .then((d) => { if (req === rowsReq.current) setScanRows(d.postings ?? []); })
+      .catch(() => { if (req === rowsReq.current) setScanRows([]); });
   }, [tab]);
   // Tab switch (and first mount): a fresh data set, so clear to the loading placeholder, then load.
   // Tab switch: clear to the loading placeholder then load the new step's rows; a one-shot reset on

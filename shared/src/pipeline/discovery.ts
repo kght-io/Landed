@@ -31,3 +31,20 @@ export const DISCOVERY_ARCHIVE: SpineStep[] = [
 // Total candidates in a pre-apply step — summed across its member scan-store states.
 export const stepCount = (step: SpineStep, counts: Record<string, number> | null | undefined): number =>
   step.states.reduce((n, s) => n + (counts?.[s] ?? 0), 0);
+
+// Every step the pipeline can show — the spine plus the archive steps (reachable, but off the ribbon).
+export const ALL_STEPS: SpineStep[] = [...DISCOVERY_SPINE, ...DISCOVERY_ARCHIVE];
+// The step a first-time visitor lands on.
+export const DEFAULT_STEP = "fit";
+
+// The active step is persisted, so leaving the page and coming back lands on the step you left. It
+// MUST resolve from the stored value synchronously (before the first render): a step restored later,
+// in a mount effect, makes the page fetch the DEFAULT step's rows first and land that response in
+// the restored step's table. Anything unrecognized (a step that no longer exists, a corrupt value)
+// falls back to the default.
+export const resolveStep = (stored: unknown): string =>
+  typeof stored === "string" && ALL_STEPS.some((s) => s.key === stored) ? stored : DEFAULT_STEP;
+
+// The scan-store states a step spans — what `/api/scanned?state=` is asked for. An unrecognized key
+// stands for itself, so a single-state step needs no entry.
+export const stepStatesFor = (key: string): string[] => ALL_STEPS.find((s) => s.key === key)?.states ?? [key];

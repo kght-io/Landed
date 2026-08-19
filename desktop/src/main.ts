@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import { APP_ORIGIN, ensureAssetRoot, getAssetRoot } from "./config";
 import { listDir, resolveWithin } from "./browse";
@@ -162,7 +163,27 @@ function createWindow(): BrowserWindow {
     void shell.openExternal(url);
     return { action: "deny" };
   });
-  void win.loadFile(path.join(__dirname, "renderer", "index.html"));
+  // In development, load the renderer from SOURCE rather than the copy in dist/. A reload then
+  // picks up an edit immediately, instead of needing a rebuild and a relaunch for a CSS tweak.
+  // Packaged builds always use dist/, which is the only thing shipped.
+  const devRenderer = path.join(__dirname, "..", "src", "renderer", "index.html");
+  const renderer =
+    !app.isPackaged && fs.existsSync(devRenderer) ? devRenderer : path.join(__dirname, "renderer", "index.html");
+  void win.loadFile(renderer);
+
+  // Watch the renderer and reload on change. Only the renderer: main-process code cannot be
+  // hot-swapped — this file builds the window that would do the swapping — so a change here still
+  // needs a relaunch, and pretending otherwise would be worse than the honest restart.
+  if (!app.isPackaged && renderer === devRenderer) {
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const watcher = fs.watch(path.dirname(devRenderer), () => {
+      // Editors write a file in several operations; one reload per burst rather than per event.
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => win.webContents.reloadIgnoringCache(), 80);
+    });
+    win.on("closed", () => watcher.close());
+  }
+
   return win;
 }
 

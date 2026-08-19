@@ -27,7 +27,13 @@ export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 export const DEFAULT_CLAUDE_MODEL = "claude-opus-5";
 export const claudeModel = (): string => process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL;
 
-/** Where the two MCP servers live — bundled beside the app in production, in the repo in dev. */
+/**
+ * Where the two MCP servers live: Resources/ in a packaged app, the repo in dev.
+ *
+ * Both are shipped as extraResources rather than left inside the bundle, because the `claude` CLI
+ * spawns them as separate processes and a path inside app.asar is not something an external process
+ * can execute. Resources/ is plain files on disk either way.
+ */
 function serverPath(...rel: string[]): string | null {
   const packaged = path.join(process.resourcesPath ?? "", ...rel);
   if (fs.existsSync(packaged)) return packaged;
@@ -50,7 +56,8 @@ export function writeMcpConfig(appOrigin: string): string {
       : {};
 
   const jobhunt = serverPath("mcp", "jobhunt-server.mjs");
-  const local = path.join(__dirname, "mcp-local.js");
+  // Packaged: Resources/mcp/mcp-local.js. Dev: the build output next to this file.
+  const local = serverPath("mcp", "mcp-local.js") ?? path.join(__dirname, "mcp-local.js");
 
   // BOTH servers are Node scripts, and process.execPath here is the ELECTRON binary, not node —
   // the same line copied from backend/src/agents/claude-code.ts means something different inside a

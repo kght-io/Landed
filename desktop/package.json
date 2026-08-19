@@ -9,13 +9,15 @@
     "build": "node build.mjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p . --noEmit",
-    "dev": "node build.mjs --watch & electron ."
+    "dev": "node build.mjs --watch & electron .",
+    "package": "npm run build && electron-builder --config electron-builder.yml"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "electron": "^33.0.0",
+    "electron": "33.4.11",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.1"
   },
@@ -26,5 +28,6 @@
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
-  }
+  },
+  "author": "Kaung"
 }

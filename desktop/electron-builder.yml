@@ -1,0 +1,49 @@
+# Packaging.
+#
+# The only genuinely app-specific part is extraResources: this app spawns the `claude` CLI, which
+# spawns the two MCP servers as separate processes. A path inside app.asar is not something an
+# external process can execute, so both servers ship as plain files under Resources/ — see
+# serverPath() in src/agent.ts, which looks there first and falls back to the repo in dev.
+
+appId: uk.kaungslab.landed
+productName: Landed
+copyright: © Kaung
+
+directories:
+  output: release
+  buildResources: build
+
+# dist/ is the whole app: esbuild bundles main, preload, the renderer and the local MCP server, so
+# node_modules is not shipped. package.json comes along because Electron reads productName from it.
+files:
+  - dist/**
+  - package.json
+
+extraResources:
+  # The cloud-facing MCP server, from the repo workspace.
+  - from: ../mcp/jobhunt-server.mjs
+    to: mcp/jobhunt-server.mjs
+  # The machine-facing one, from this build.
+  - from: dist/mcp-local.js
+    to: mcp/mcp-local.js
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64]
+  # Unsigned for now. Signing needs an Apple Developer identity, and notarisation needs an app-
+  # specific password — neither belongs in the repo. Until then macOS will quarantine the download,
+  # and the app must be opened once via right-click → Open. See the README section added with this.
+  identity: null
+
+dmg:
+  title: Landed
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

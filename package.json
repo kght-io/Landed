@@ -35,7 +35,8 @@
     "check": "npm run typecheck && npm run boundary && npm test",
     "prepare": "git config core.hooksPath .githooks || true",
     "desktop": "npm run start --workspace @landed/desktop",
-    "desktop:dev": "npm run dev --workspace @landed/desktop"
+    "desktop:dev": "npm run dev --workspace @landed/desktop",
+    "desktop:package": "npm run package --workspace @landed/desktop"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -33,10 +33,18 @@ mac:
   target:
     - target: dmg
       arch: [arm64]
-  # Unsigned for now. Signing needs an Apple Developer identity, and notarisation needs an app-
-  # specific password — neither belongs in the repo. Until then macOS will quarantine the download,
-  # and the app must be opened once via right-click → Open. See the README section added with this.
-  identity: null
+
+  # Signing and notarisation are CONFIGURED here but driven by credentials that are not in the repo.
+  # `npm run package` sets CSC_IDENTITY_AUTO_DISCOVERY=false and produces an unsigned build;
+  # `npm run package:signed` does not, so electron-builder finds the identity in the keychain and
+  # notarises with the APPLE_* variables. See README.md for what those are.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  # Child processes get their own copy — the MCP servers are spawned, and an entitlement the parent
+  # holds does not reach them otherwise.
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
 
 dmg:
   title: Landed

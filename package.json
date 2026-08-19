@@ -36,7 +36,8 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "desktop": "npm run start --workspace @landed/desktop",
     "desktop:dev": "npm run dev --workspace @landed/desktop",
-    "desktop:package": "npm run package --workspace @landed/desktop"
+    "desktop:package": "npm run package --workspace @landed/desktop",
+    "desktop:package:signed": "npm run package:signed --workspace @landed/desktop"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

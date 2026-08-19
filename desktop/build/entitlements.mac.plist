@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Chromium's JIT. Every Electron app needs these two under the hardened runtime. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- THE ONE THAT IS ABOUT THIS APP SPECIFICALLY.
+       Both MCP servers run as `Electron <script>` with ELECTRON_RUN_AS_NODE=1, because a packaged
+       app cannot assume the user has node installed. The hardened runtime strips DYLD_* and other
+       environment variables from child processes unless this is granted, and ELECTRON_RUN_AS_NODE
+       goes with them — so without this, signing silently breaks every tool the agent has. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+  <!-- The app spawns `claude`, signed by someone else, and loads its own unpacked resources. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

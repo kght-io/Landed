@@ -10,7 +10,8 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc -p . --noEmit",
     "dev": "node build.mjs --watch & electron .",
-    "package": "npm run build && electron-builder --config electron-builder.yml"
+    "package": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml",
+    "package:signed": "npm run build && electron-builder --config electron-builder.yml"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

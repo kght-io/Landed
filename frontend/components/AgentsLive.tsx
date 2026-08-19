@@ -20,6 +20,10 @@ type JobView = { type: string; status: string };
 // The Claude-Code-backed Agents section: one agent per job type, each a live streaming conversation.
 // All chat state lives in AgentChatsProvider (root layout), so conversations + in-flight runs survive
 // navigating between pages; this component is just the view + the backlog counts.
+// The four pieces below (ContextMeter, AutoDrainToggle, WorkQueueButton, LiveAgentChat) are also
+// exported because the desktop app composes them into a different layout — a left rail of agents
+// rather than a column of collapsible cards. Exporting them is what keeps that a re-arrangement
+// rather than a second implementation of the same controls.
 export default function AgentsLive() {
   const { open, setOpen } = useAgentChats();
   const [types, setTypes] = useState<JobTypeMeta[]>([]);
@@ -151,7 +155,7 @@ const fmtTok = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n
 
 // How full this agent's resumed session context is — a bar + Xk label that goes amber at 70% and
 // rose at 85%, so a long-lived session's context pressure is visible (nudge: hit the eraser to reset).
-function ContextMeter({ tokens, model }: { tokens?: number; model?: string }) {
+export function ContextMeter({ tokens, model }: { tokens?: number; model?: string }) {
   const win = contextWindow(model);
   const known = typeof tokens === "number" && tokens > 0;
   const pct = known ? Math.min(100, (tokens! / win) * 100) : 0;
@@ -268,7 +272,7 @@ function AgentCard({ meta, backlog, open, onToggle, onInstructions, disabled, di
 // Per-agent auto-drain status pill + toggle. Green "Auto" = queued jobs start their agent on their
 // own; grey "Paused" = a manual Stop turned it off, so it stays stopped until re-armed here or by
 // "Work queue". Reflects + flips this agent's `autoDrain` flag (see AgentChatsProvider).
-function AutoDrainToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+export function AutoDrainToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
       onClick={() => onChange(!on)}
@@ -289,7 +293,7 @@ function AutoDrainToggle({ on, onChange }: { on: boolean; onChange: (v: boolean)
 
 // Start/stop the queue drain — lives in the Queue panel (it acts on the queue). Toggles to Stop
 // while a run is streaming.
-function WorkQueueButton({ type, disabled }: { type: string; disabled?: boolean }) {
+export function WorkQueueButton({ type, disabled }: { type: string; disabled?: boolean }) {
   const { get, start, stop } = useAgentChats();
   const { running } = get(type);
   if (disabled)
@@ -309,7 +313,7 @@ function WorkQueueButton({ type, disabled }: { type: string; disabled?: boolean 
   );
 }
 
-function LiveAgentChat({ type, backlog }: { type: string; backlog: number }) {
+export function LiveAgentChat({ type, backlog }: { type: string; backlog: number }) {
   const { get, start, stop, lastEventAt } = useAgentChats();
   const { entries, running } = get(type);
   const [input, setInput] = useState("");

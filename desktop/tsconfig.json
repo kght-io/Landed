@@ -1,0 +1,18 @@
+{
+  // Emits CommonJS into dist/ because that is what Electron's main process and a sandboxed preload
+  // load without ceremony. The repo-wide gate (root tsconfig.json) type-checks these same files
+  // under the shared settings; this config exists to BUILD them, not to check them.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts"]
+}

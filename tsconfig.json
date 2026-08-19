@@ -14,6 +14,7 @@
     "backend/**/*.ts",
     "shared/**/*.ts",
     "mcp/**/*.mjs",
+    "desktop/src/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "*.ts",

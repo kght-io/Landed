@@ -5,8 +5,10 @@ import { createPortal } from "react-dom";
 import { FolderOpen, GitCompareArrows, Loader2, X } from "lucide-react";
 import RedoComposer from "@/components/RedoComposer";
 import type { DiffOp } from "@landed/shared/util/linediff";
+import { getResumeDiff, revealResumeFolder, type ResumeDiffResult } from "@/lib/local-capability";
 
-type DiffResult = { ok: true; slug: string; base: string; added: number; removed: number; ops: DiffOp[] } | { error: string };
+// The endpoint's shape now lives with the seam that fetches it (see @/lib/local-capability).
+type DiffResult = ResumeDiffResult;
 
 // A git-style diff of a tailored resume against the base, as a modal. Prefers the agent's own
 // **annotated** diff (each changed line carries *why* it changed) when the version supplies one;
@@ -29,15 +31,13 @@ export default function ResumeDiffModal({ slug, title, postingId, redoNote, anno
     // The modal is keyed by slug at the call site, so each slug gets a fresh mount (data starts
     // null) — no need to reset state here, which keeps this effect a pure external-sync.
     let alive = true;
-    fetch(`/api/resume/diff?slug=${encodeURIComponent(slug)}`)
-      .then((r) => r.json())
+    getResumeDiff(slug)
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setData({ error: String(e) }); });
     return () => { alive = false; };
   }, [slug, annotated]);
 
-  const openFolder = () =>
-    fetch("/api/resume/open", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug }) }).catch(() => {});
+  const openFolder = () => revealResumeFolder(slug);
 
   // The annotated diff (preferred) or the fetched computed diff, normalized to one shape.
   const ok = annotated

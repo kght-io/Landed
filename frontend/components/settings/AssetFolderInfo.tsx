@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { FolderOpen } from "lucide-react";
+import { getPaths, revealAssetFolder, type Paths } from "@/lib/local-capability";
 
 // Compact reference to the asset folder the app + agent share — just the resolved paths plus an
 // "Open in Finder" convenience. (The full in-app browser was removed as out of place in Settings.)
 export default function AssetFolderInfo() {
-  const [paths, setPaths] = useState<{ assetRoot: string; instructionsRoot: string } | null>(null);
+  const [paths, setPaths] = useState<Paths | null>(null);
 
   useEffect(() => {
-    fetch("/api/config/paths").then((r) => r.json()).then(setPaths).catch(() => {});
+    getPaths().then(setPaths).catch(() => {});
   }, []);
 
-  const open = () => fetch("/api/config/paths", { method: "POST" }).catch(() => {});
+  const open = () => revealAssetFolder();
 
   return (
     <div className="space-y-3">

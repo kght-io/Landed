@@ -11,6 +11,7 @@ import InterviewStages from "./InterviewStages";
 import CoolingBadge from "./CoolingBadge";
 import { AttachmentChip, revealPrepFolder } from "./PrepFiles";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
+import { baseResumeUrl, getPrepAssets, type PrepAssets } from "@/lib/local-capability";
 import { tailorDiffFor } from "@landed/shared/jobs/redolog";
 import { FitBadge, GapList } from "./Badges";
 import ResumeDiffModal from "@/components/ResumeDiff";
@@ -125,13 +126,6 @@ function RowButton({ state, label, onClick }: { state: "idle" | "queuing" | "que
   );
 }
 
-type PrepAssets = {
-  slug: string;
-  emails: { at: string | null; attachments: { name: string; bytes: number }[] };
-  questions: { researchedAt: string | null };
-  transcripts: { name: string; bytes: number; at: string }[];
-  context: { at: string | null };
-};
 
 // The three asset INPUTS that feed the interview brief — pull interview emails, research questions,
 // add transcript — each with a dumped-vs-missing status, plus a link into the asset folder. Reads
@@ -145,9 +139,8 @@ function PrepMaterials({ p, onChanged }: { p: Posting; onChanged?: () => void })
   const [showPaste, setShowPaste] = useState(false);
 
   const refresh = useCallback(() => {
-    fetch(`/api/applications/${p.id}/prep-assets`)
-      .then((r) => r.json())
-      .then((d) => { if (!d.error) setAssets(d as PrepAssets); })
+    getPrepAssets(p.id)
+      .then((d) => { if (!("error" in d)) setAssets(d); })
       .catch(() => {});
   }, [p.id]);
   useEffect(() => { refresh(); }, [refresh]);
@@ -501,7 +494,7 @@ function BaseResumeSection({ chosen, onChoose }: { chosen: string | null; onChoo
       <SectionLabel>Base résumé</SectionLabel>
       <div className={`rounded-lg border p-2.5 ${active ? "border-emerald-500/40 bg-emerald-500/[0.06]" : "border-zinc-800 bg-zinc-900/40"}`}>
         <div className="flex items-center gap-3">
-          <a href="/api/resume/base" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[13px] text-sky-300 transition hover:text-sky-200">
+          <a href={baseResumeUrl()} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[13px] text-sky-300 transition hover:text-sky-200">
             <FileText size={14} className="shrink-0" /> base résumé PDF <ExternalLink size={11} className="shrink-0" />
           </a>
           <span className="ml-auto shrink-0"><UsedForApp checked={active} onToggle={() => onChoose(active ? null : "base")} /></span>

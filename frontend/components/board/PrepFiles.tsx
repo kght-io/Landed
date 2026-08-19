@@ -6,12 +6,13 @@
 
 import { FileText } from "lucide-react";
 import { fmtBytes } from "@landed/shared/format/bytes";
+import { attachmentUrl, revealPrepFolder as revealPrepFolderLocal } from "@/lib/local-capability";
 
 // One downloaded attachment, linked to the route that serves it out of interview-prep/<slug>/.
 export function AttachmentChip({ postingId, name, bytes }: { postingId: string; name: string; bytes?: number }) {
   return (
     <a
-      href={`/api/applications/${postingId}/attachments/${encodeURIComponent(name)}`}
+      href={attachmentUrl(postingId, name)}
       target="_blank"
       rel="noreferrer"
       title={bytes == null ? name : `${name} · ${fmtBytes(bytes)}`}
@@ -26,9 +27,5 @@ export function AttachmentChip({ postingId, name, bytes }: { postingId: string; 
 // Reveal the company's interview-prep folder in the OS file browser. Local-only convenience (the
 // server runs on this machine); best-effort, so a failure is silent rather than a broken button.
 export function revealPrepFolder(postingId: string) {
-  fetch(`/api/applications/${postingId}/prep-assets`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "open" }),
-  }).catch(() => {});
+  void revealPrepFolderLocal(postingId);
 }

@@ -1,0 +1,14 @@
+{
+  "name": "@landed/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Electron shell. A window onto the app (wherever it runs) plus the capabilities a browser cannot offer: revealing folders and reading files on the machine the résumés actually live on.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

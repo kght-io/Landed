@@ -6,7 +6,8 @@
     "frontend",
     "backend",
     "shared",
-    "mcp"
+    "mcp",
+    "desktop"
   ],
   "engines": {
     "node": ">=24"
@@ -32,7 +33,8 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "smoke": "node scripts/smoke.mjs",
     "check": "npm run typecheck && npm run boundary && npm test",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "desktop": "npm run start --workspace @landed/desktop"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -55,5 +57,11 @@
     "@emnapi/wasi-threads": "1.2.2",
     "postcss": "8.5.22",
     "sharp": "0.35.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "electron@33.4.11": true,
+    "esbuild@0.28.1": true,
+    "unrs-resolver@1.12.2": true
   }
 }

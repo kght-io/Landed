@@ -1,67 +1,95 @@
 <!doctype html>
 <meta charset="utf-8" />
+<meta name="color-scheme" content="light dark" />
 <title>Landed</title>
 <style>
-  :root { color-scheme: dark; }
+  /* Follows the system appearance rather than picking one. An app that is dark on a light-mode
+     desktop reads as broken, and this window sits next to Finder and Mail, not inside the web app.
+     Every colour is a light-dark() pair on one token, so there is no second palette to keep in sync
+     and no [data-theme] selectors to forget. */
+  :root {
+    color-scheme: light dark;
+
+    --bg:        light-dark(#ffffff, #09090b);
+    --bg-sunken: light-dark(#f4f4f5, #18181b);
+    --bg-raised: light-dark(#ffffff, #18181b);
+    --bg-hover:  light-dark(#f4f4f5, #1f1f23);
+    --bg-active: light-dark(#e4e4e7, #27272a);
+
+    --text:      light-dark(#18181b, #e4e4e7);
+    --text-dim:  light-dark(#52525b, #a1a1aa);
+    --text-mute: light-dark(#a1a1aa, #52525b);
+
+    --line:      light-dark(#e4e4e7, #27272a);
+    --line-firm: light-dark(#d4d4d8, #3f3f46);
+
+    --live:      light-dark(#16a34a, #22c55e);
+    --error:     light-dark(#dc2626, #ef4444);
+  }
+
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: #09090b; color: #e4e4e7;
+    margin: 0; background: var(--bg); color: var(--text);
     font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     height: 100vh; display: grid; grid-template-rows: auto auto 1fr auto;
   }
+
   header { -webkit-app-region: drag; padding: 12px 16px 8px; display: flex; align-items: center; gap: 10px; }
   header h1 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: .01em; }
   header .spacer { flex: 1; }
+
   button { -webkit-app-region: no-drag; font: inherit; cursor: pointer;
-    background: #27272a; color: #e4e4e7; border: 1px solid #3f3f46; border-radius: 7px; padding: 4px 10px; }
-  button:hover { background: #3f3f46; }
-  button.ghost { background: transparent; border-color: transparent; color: #a1a1aa; padding: 4px 6px; }
-  button.ghost:hover { color: #e4e4e7; background: #27272a; }
+    background: var(--bg-active); color: var(--text); border: 1px solid var(--line-firm);
+    border-radius: 7px; padding: 4px 10px; }
+  button:hover { background: var(--bg-hover); }
+  button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); padding: 4px 6px; }
+  button.ghost:hover { color: var(--text); background: var(--bg-sunken); }
+
+  .tabs { -webkit-app-region: no-drag; display: flex; gap: 2px; margin-left: 8px; }
+  .tab { background: transparent; border: none; color: var(--text-dim); padding: 3px 10px; border-radius: 7px; }
+  .tab:hover { color: var(--text); background: var(--bg-sunken); }
+  .tab[aria-selected="true"] { background: var(--bg-active); color: var(--text); }
+
   nav { padding: 0 16px 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
     font-variant-numeric: tabular-nums; }
-  nav .crumb { color: #a1a1aa; background: none; border: none; padding: 2px 4px; border-radius: 5px; }
-  nav .crumb:hover { color: #e4e4e7; background: #27272a; }
-  nav .sep { color: #52525b; }
+  nav .crumb { color: var(--text-dim); background: none; border: none; padding: 2px 4px; border-radius: 5px; }
+  nav .crumb:hover { color: var(--text); background: var(--bg-sunken); }
+  nav .sep { color: var(--text-mute); }
+
   main { overflow: auto; padding: 0 8px 8px; }
   ul { list-style: none; margin: 0; padding: 0 8px; }
   li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: default; }
-  li:hover { background: #18181b; }
-  li .icon { width: 16px; text-align: center; color: #71717a; flex: none; }
+  li:hover { background: var(--bg-sunken); }
+  li .icon { width: 16px; text-align: center; color: var(--text-mute); flex: none; }
   li .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  li .size { color: #71717a; font-variant-numeric: tabular-nums; font-size: 12px; flex: none; }
+  li .size { color: var(--text-mute); font-variant-numeric: tabular-nums; font-size: 12px; flex: none; }
   li .rev { opacity: 0; }
   li:hover .rev { opacity: 1; }
-  li.dir .name { color: #e4e4e7; }
   li.dir { cursor: pointer; }
-  .empty { color: #52525b; padding: 24px 16px; text-align: center; }
-  footer { padding: 10px 16px; border-top: 1px solid #27272a; display: flex; align-items: center; gap: 10px;
-    color: #71717a; font-size: 12px; }
-  footer code { color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+  .empty { color: var(--text-mute); padding: 24px 16px; text-align: center; }
 
-  .tabs { -webkit-app-region: no-drag; display: flex; gap: 2px; margin-left: 8px; }
-  .tab { background: transparent; border: none; color: #71717a; padding: 3px 10px; border-radius: 7px; }
-  .tab:hover { color: #e4e4e7; background: #18181b; }
-  .tab[aria-selected="true"] { background: #27272a; color: #e4e4e7; }
-
-  /* One <main> holds both views; the body class decides which is on. */
   #agent { display: none; height: 100%; grid-template-rows: auto 1fr; }
   body.view-agent #list, body.view-agent nav { display: none; }
   body.view-agent #agent { display: grid; }
   body.view-files #agent { display: none; }
 
   .types { display: flex; gap: 6px; padding: 4px 16px 10px; flex-wrap: wrap; }
-  .types button { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #18181b;
-    border: 1px solid #27272a; color: #a1a1aa; }
-  .types button[aria-selected="true"] { background: #27272a; color: #e4e4e7; border-color: #3f3f46; }
-  .types button.live { border-color: #16a34a; color: #86efac; }
+  .types button { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--bg-sunken);
+    border: 1px solid var(--line); color: var(--text-dim); }
+  .types button[aria-selected="true"] { background: var(--bg-active); color: var(--text); border-color: var(--line-firm); }
+  .types button.live { border-color: var(--live); color: var(--live); }
 
   #log { margin: 0; padding: 0 16px 16px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a1a1aa; }
-  #log:empty::after { content: "No output yet. The agent writes here while it drains."; color: #52525b; }
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-dim); }
+  #log:empty::after { content: "No output yet. The agent writes here while it drains."; color: var(--text-mute); }
 
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #52525b; flex: none; }
-  .dot.live { background: #22c55e; }
-  .dot.error { background: #ef4444; }
+  footer { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px;
+    color: var(--text-dim); font-size: 12px; }
+  footer code { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-mute); flex: none; }
+  .dot.live { background: var(--live); }
+  .dot.error { background: var(--error); }
 </style>
 
 <header>

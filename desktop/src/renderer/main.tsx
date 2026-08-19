@@ -18,9 +18,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import AgentChatsProvider from "./providers/AgentChatsProvider";
 import AgentQueueProvider from "@/components/AgentQueueProvider";
-import Agents from "./Agents";
+import AgentsView from "@/components/AgentsView";
+import Files from "./Files";
 import { AUTO_WORK_KEY } from "@/components/AutoWorkController";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 // Relative /api calls go through main, which has no CORS to satisfy and already holds the Access
 // token. Installed before anything renders so no component can race it.
@@ -83,14 +84,25 @@ function useAutoWorkBridge() {
 }
 
 function App() {
+  const [view, setView] = useState<"agents" | "files">("agents");
   useAutoWorkBridge();
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-200">
       {/* The window is titleBarStyle: "hiddenInset", so macOS draws its traffic lights OVER the top
           left of the content. This strip is the room they need — draggable, since removing the title
           bar also removed the only place to grab the window. */}
-      <div className="flex h-9 shrink-0 items-center gap-2 pr-3 pl-20 [-webkit-app-region:drag]">
-        <span className="text-[12px] font-semibold text-zinc-400">Landed</span>
+      <div className="flex h-9 shrink-0 items-center gap-1 pr-3 pl-20 [-webkit-app-region:drag]">
+        {(["agents", "files"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`rounded-md px-2.5 py-1 text-[12px] capitalize transition [-webkit-app-region:no-drag] ${
+              view === v ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
         <span className="flex-1" />
         <button
           onClick={() => void window.landed.openInBrowser()}
@@ -100,9 +112,10 @@ function App() {
         </button>
       </div>
 
-      {/* Agents owns the rest: the rail, the selected chat, and the Monitor / MCP / Files panes. */}
+      {/* AgentsView unchanged from the web app — its own header, its Chat / Monitor / MCP tabs, its
+          own scrolling. Files is the one view with no counterpart there. */}
       <main className="min-h-0 flex-1 overflow-hidden">
-        <Agents />
+        {view === "agents" ? <AgentsView /> : <div className="h-full px-6 py-5"><Files /></div>}
       </main>
     </div>
   );

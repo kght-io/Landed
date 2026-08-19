@@ -6,16 +6,25 @@
   "description": "The Electron shell. A window onto the app (wherever it runs) plus the capabilities a browser cannot offer: revealing folders and reading files on the machine the r\u00e9sum\u00e9s actually live on.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "esbuild src/main.ts src/preload.ts src/mcp-local.ts --bundle --platform=node --target=node20 --format=cjs --outdir=dist --external:electron --sourcemap && node -e \"require('fs').cpSync('src/renderer','dist/renderer',{recursive:true});require('fs').cpSync('src/assets','dist/assets',{recursive:true})\"",
+    "build": "node build.mjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p . --noEmit",
-    "dev": "esbuild src/main.ts src/preload.ts src/mcp-local.ts --bundle --platform=node --target=node20 --format=cjs --outdir=dist --external:electron --sourcemap --watch=forever & node -e \"require('fs').cpSync('src/assets','dist/assets',{recursive:true})\" && electron ."
+    "dev": "node build.mjs --watch & electron ."
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "electron": "^33.0.0",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "tailwindcss": "^4.3.1"
   },
   "dependencies": {
-    "fflate": "^0.8.3"
+    "fflate": "^0.8.3",
+    "lucide-react": "^1.33.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }

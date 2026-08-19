@@ -87,7 +87,12 @@ export function writeMcpConfig(appOrigin: string): string {
  * Rejects on a non-zero exit so the supervisor can back off and report — a silent failure here is
  * the failure mode that makes the app look alive while draining nothing.
  */
-export function runDrain(type: string, appOrigin: string, onFrame?: (frame: Frame) => void): Promise<void> {
+export function runDrain(
+  type: string,
+  appOrigin: string,
+  onFrame?: (frame: Frame) => void,
+  onChild?: (handle: { kill: () => void }) => void,
+): Promise<void> {
   const mcp = writeMcpConfig(appOrigin);
   const root = getAssetRoot();
 
@@ -133,6 +138,10 @@ export function runDrain(type: string, appOrigin: string, onFrame?: (frame: Fram
     // parsing per chunk drops frames. Hold the trailing partial until its newline arrives.
     const state: TranslateState = {};
     let buffer = "";
+    // Hand the caller a way to stop this run. SIGTERM rather than SIGKILL so the CLI can close its
+    // MCP children instead of orphaning them.
+    onChild?.({ kill: () => { try { child.kill("SIGTERM"); } catch { /* already gone */ } } });
+
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
       buffer += chunk;

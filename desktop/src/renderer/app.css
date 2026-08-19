@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Scan the reused web components too — their classes are the layout, and Tailwind only emits what
+   it can see. Without this the agent view renders unstyled. */
+@source "../../../frontend/components";
+@source "./";
+
+html, body, #root { height: 100%; }
+body { margin: 0; }

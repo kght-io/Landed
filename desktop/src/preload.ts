@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld("landed", {
   // stacking listeners when it re-renders.
   agentTypes: () => ipcRenderer.invoke("agent:types"),
   queueCounts: () => ipcRenderer.invoke("queue:counts"),
+  agentStart: (type: string) => ipcRenderer.invoke("agent:start", type),
+  agentStop: (type: string) => ipcRenderer.invoke("agent:stop", type),
+  agentClear: (type: string) => ipcRenderer.invoke("agent:clear", type),
+
+  // Proxy for the reused web components' relative /api calls — see main.ts for why they cannot go
+  // out from a file:// origin directly.
+  apiFetch: (path: string, init?: { method?: string; body?: string }) =>
+    ipcRenderer.invoke("net:fetch", path, init),
   agentTranscript: (type: string) => ipcRenderer.invoke("agent:transcript", type),
   agentStatus: () => ipcRenderer.invoke("agent:status"),
   onAgentFrame: (cb: (e: { type: string; transcript: unknown }) => void) => {

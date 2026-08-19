@@ -46,6 +46,13 @@ const transcripts = new Map<string, Transcript>();
 let entryId = 0;
 const nextEntryId = () => ++entryId;
 
+// Live agent children, so a Stop button can actually stop one.
+const children = new Map<string, { kill: () => void }>();
+
+function killRun(type: string): void {
+  children.get(type)?.kill();
+}
+
 function pushFrame(type: string, frame: Frame): void {
   const before = transcripts.get(type) ?? emptyTranscript();
   const after = reduceFrame(before, frame, nextEntryId);
@@ -165,23 +172,18 @@ function createWindow(): BrowserWindow {
     void shell.openExternal(url);
     return { action: "deny" };
   });
-  // In development, load the renderer from SOURCE rather than the copy in dist/. A reload then
-  // picks up an edit immediately, instead of needing a rebuild and a relaunch for a CSS tweak.
-  // Packaged builds always use dist/, which is the only thing shipped.
-  const devRenderer = path.join(__dirname, "..", "src", "renderer", "index.html");
-  const renderer =
-    !app.isPackaged && fs.existsSync(devRenderer) ? devRenderer : path.join(__dirname, "renderer", "index.html");
-  void win.loadFile(renderer);
+  // Always dist/: the renderer is a bundle now (React + the web app's own components), so there is
+  // no source file a browser could load directly. `npm run desktop:dev` keeps esbuild watching, and
+  // the watcher below reloads the window when it rewrites the bundle.
+  const rendererDir = path.join(__dirname, "renderer");
+  void win.loadFile(path.join(rendererDir, "index.html"));
 
-  // Watch the renderer and reload on change. Only the renderer: main-process code cannot be
-  // hot-swapped — this file builds the window that would do the swapping — so a change here still
-  // needs a relaunch, and pretending otherwise would be worse than the honest restart.
-  if (!app.isPackaged && renderer === devRenderer) {
+  if (!app.isPackaged) {
     let pending: ReturnType<typeof setTimeout> | null = null;
-    const watcher = fs.watch(path.dirname(devRenderer), () => {
-      // Editors write a file in several operations; one reload per burst rather than per event.
+    const watcher = fs.watch(rendererDir, () => {
+      // A rebuild writes several files; one reload per burst rather than per write.
       if (pending) clearTimeout(pending);
-      pending = setTimeout(() => win.webContents.reloadIgnoringCache(), 80);
+      pending = setTimeout(() => win.webContents.reloadIgnoringCache(), 120);
     });
     win.on("closed", () => watcher.close());
   }
@@ -208,6 +210,44 @@ app.whenReady().then(async () => {
     const target = resolveWithin(getAssetRoot(), typeof rel === "string" ? rel : "");
     if (target) shell.showItemInFolder(target);
   });
+  // A fetch proxy for the renderer.
+  //
+  // The window is a file:// origin, so every relative "/api/..." call the reused web components make
+  // would be cross-origin — blocked before it left the page. Proxying through main sidesteps that
+  // entirely (Node has no CORS), and it is where the Cloudflare Access token already lives, so the
+  // components need no knowledge of either. That is what lets AgentQueueProvider, AgentQueue and
+  // Playbook run here unmodified instead of being forked.
+  ipcMain.handle("net:fetch", async (_e, path: string, init?: { method?: string; body?: string }) => {
+    if (typeof path !== "string" || !path.startsWith("/api/")) {
+      return { ok: false, status: 400, body: '{"error":"only /api paths"}' };
+    }
+    try {
+      const res = await fetch(`${APP_ORIGIN}${path}`, {
+        method: init?.method ?? "GET",
+        headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...accessHeaders() },
+        body: init?.body,
+      });
+      return { ok: res.ok, status: res.status, body: await res.text() };
+    } catch (e) {
+      return { ok: false, status: 0, body: JSON.stringify({ error: String(e) }) };
+    }
+  });
+
+  // The supervisor owns the run lifecycle, so these are nudges rather than commands: `start` sets the
+  // app's drain trigger (the same one the web "Work queue" button uses) so the waiting long-poll
+  // returns immediately; `stop` kills the child; `clear` forgets a transcript.
+  ipcMain.handle("agent:start", async (_e, type: string) => {
+    await fetch(`${APP_ORIGIN}/api/jobs/wait`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...accessHeaders() },
+      body: JSON.stringify({ type }),
+    }).catch(() => undefined);
+  });
+  ipcMain.handle("agent:stop", (_e, type: string) => killRun(type));
+  ipcMain.handle("agent:clear", (_e, type: string) => {
+    transcripts.delete(type);
+  });
+
   ipcMain.handle("app:openInBrowser", () => shell.openExternal(APP_ORIGIN));
   ipcMain.handle("app:origin", () => APP_ORIGIN);
   // Persona names come from shared/, the same map the web agents page reads, so an agent is called
@@ -266,9 +306,12 @@ app.whenReady().then(async () => {
     types: DRAIN_TYPES,
     poll: pollForWork,
     run: (type) =>
-      runDrain(type, APP_ORIGIN, (frame) => {
-        pushFrame(type, frame);
-      }),
+      runDrain(
+        type,
+        APP_ORIGIN,
+        (frame) => pushFrame(type, frame),
+        (handle) => children.set(type, handle),
+      ).finally(() => children.delete(type)),
     onError: (e, type) => {
       pushFrame(type, { kind: "note", text: String(e), error: true });
       lastError = String(e);

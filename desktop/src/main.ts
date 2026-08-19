@@ -8,6 +8,7 @@ import { revealAssetFolder, revealPrepFolder, revealResumeFolder } from "./local
 import { runDrain } from "./agent";
 import { createDrainLoop, type WaitResult } from "./supervisor";
 import { emptyTranscript, reduceFrame, type Frame, type Transcript } from "@landed/shared/agents/stream";
+import { personaFor } from "@landed/shared/agents/personas";
 
 // THE DESKTOP APP.
 //
@@ -59,17 +60,18 @@ const DRAIN_TYPES = ["fit", "tailoring", "prep-research", "interview-brief", "in
 
 // Long-poll the app for claimable work. The 25s hold is the queue's, not ours — there is no
 // interval here to tune, and an empty result simply means "ask again".
+const accessHeaders = (): Record<string, string> | undefined =>
+  process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET
+    ? {
+        "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
+        "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET,
+      }
+    : undefined;
+
 async function pollForWork(type: string, signal: AbortSignal): Promise<WaitResult> {
-  const access =
-    process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET
-      ? {
-          "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
-          "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET,
-        }
-      : undefined;
   const res = await fetch(`${APP_ORIGIN}/api/jobs/wait?type=${encodeURIComponent(type)}`, {
     signal,
-    headers: access,
+    headers: accessHeaders(),
   });
   if (!res.ok) throw new Error(`wait ${type}: ${res.status}`);
   return (await res.json()) as WaitResult;
@@ -208,7 +210,31 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("app:openInBrowser", () => shell.openExternal(APP_ORIGIN));
   ipcMain.handle("app:origin", () => APP_ORIGIN);
-  ipcMain.handle("agent:types", () => DRAIN_TYPES);
+  // Persona names come from shared/, the same map the web agents page reads, so an agent is called
+  // the same thing in both places. The renderer is plain JS and cannot import across the workspace,
+  // so main resolves them here.
+  ipcMain.handle("agent:types", () => DRAIN_TYPES.map((type) => ({ type, persona: personaFor(type) })));
+
+  // Per-type queued counts, for the backlog badge. Proxied through main rather than fetched by the
+  // renderer: the window is a file:// origin, so a direct call would be cross-origin.
+  ipcMain.handle("queue:counts", async () => {
+    try {
+      const res = await fetch(`${APP_ORIGIN}/api/jobs`, { headers: accessHeaders() });
+      if (!res.ok) return {};
+      const body = (await res.json()) as unknown;
+      const rows = (Array.isArray(body) ? body : ((body as { jobs?: unknown[] }).jobs ?? [])) as {
+        type?: string;
+        status?: string;
+      }[];
+      const counts: Record<string, number> = {};
+      for (const j of rows) {
+        if (j.status === "queued" && typeof j.type === "string") counts[j.type] = (counts[j.type] ?? 0) + 1;
+      }
+      return counts;
+    } catch {
+      return {}; // the status line already reports an unreachable backend; a badge need not shout too
+    }
+  });
   ipcMain.handle("agent:transcript", (_e, type: string) => transcripts.get(type) ?? emptyTranscript());
   ipcMain.handle("agent:status", () => ({
     running: loop?.status().running ?? [],

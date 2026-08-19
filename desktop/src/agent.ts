@@ -52,18 +52,28 @@ export function writeMcpConfig(appOrigin: string): string {
   const jobhunt = serverPath("mcp", "jobhunt-server.mjs");
   const local = path.join(__dirname, "mcp-local.js");
 
+  // BOTH servers are Node scripts, and process.execPath here is the ELECTRON binary, not node —
+  // the same line copied from backend/src/agents/claude-code.ts means something different inside a
+  // main process. Electron handed a script path tries to open it as an app; ELECTRON_RUN_AS_NODE
+  // is what makes it behave as the Node runtime it embeds.
+  //
+  // Using it rather than hunting for a system node is deliberate: a packaged app cannot assume the
+  // user has node installed at all, and the version Electron ships is the one these servers were
+  // built against.
+  const asNode = { ELECTRON_RUN_AS_NODE: "1" };
+
   const mcpServers: Record<string, unknown> = {};
   if (jobhunt) {
     mcpServers.jobhunt = {
       command: process.execPath,
       args: [jobhunt],
-      env: { JOBHUNT_THREAD_LABEL: "Landed Desktop", JOBHUNT_URL: appOrigin, ...access },
+      env: { ...asNode, JOBHUNT_THREAD_LABEL: "Landed Desktop", JOBHUNT_URL: appOrigin, ...access },
     };
   }
   mcpServers["landed-local"] = {
     command: process.execPath,
     args: [local],
-    env: { LANDED_ASSET_ROOT: getAssetRoot() },
+    env: { ...asNode, LANDED_ASSET_ROOT: getAssetRoot() },
   };
 
   fs.mkdirSync(path.dirname(file), { recursive: true });

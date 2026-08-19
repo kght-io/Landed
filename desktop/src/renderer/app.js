@@ -96,20 +96,17 @@ go("");
 
 // ─── Agent view ──────────────────────────────────────────────────────────────
 //
-// The same transcript the web agents page shows, because it is the same frames: prose merged into
-// paragraphs, tool calls with their results attached, and the context meter. What differs is where
-// it comes from — there, an SSE tail of a log file; here, the child process this app spawned.
-//
-// The reduction happens in the main process (shared/agents/stream), so this file only paints. That
-// keeps a closed window from losing history: the agent runs regardless, and reopening shows what
-// happened while you were away.
+// The web agents page's layout, with the same frames behind it: one card per agent, persona name,
+// backlog badge, context meter, and the transcript inside. Two things are deliberately absent —
+// the Auto/Paused toggle and the "Work queue" button — because this app has no manual mode. The
+// supervisor drains whatever appears; a button offering to do what already happens would be a lie.
 
-const typesEl = document.getElementById("types");
-const logEl = document.getElementById("log");
+const agentEl = document.getElementById("agent");
 const dotEl = document.getElementById("dot");
 const statusEl = document.getElementById("status");
 
-let selected = null;
+const cards = new Map(); // type → { root, log, badge, meter, spinner }
+let open = null; // only one card expanded at a time — five transcripts at once is a wall
 
 function setView(view) {
   document.body.className = `view-${view}`;
@@ -120,7 +117,7 @@ function setView(view) {
 
 const fmtTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
-// Tool inputs are arbitrary JSON. One line, clipped — the argument that matters (a slug, a type) is
+// Tool inputs are arbitrary JSON. One clipped line — the argument that matters (a slug, a type) is
 // almost always near the front, and a pretty-printed blob buries the next line of prose.
 function summarizeInput(input) {
   if (input == null) return "";
@@ -136,15 +133,14 @@ function renderEntry(e) {
     el.textContent = e.text;
     return el;
   }
-
   if (e.role === "note") {
     el.classList.toggle("error", !!e.error);
     el.textContent = e.text;
     return el;
   }
 
-  // Tool call: name, a clipped input, and the result state once it arrives. Pending calls show a
-  // dim marker rather than nothing, so a hung tool is visible instead of looking like silence.
+  // Tool call: name, clipped input, and the result once it lands. A pending call shows a dim marker
+  // rather than nothing, so a hung tool looks different from silence.
   const head = document.createElement("div");
   head.className = "tool-head";
   const dot = document.createElement("span");
@@ -167,34 +163,104 @@ function renderEntry(e) {
   return el;
 }
 
-function renderTranscript(t) {
-  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60;
-  logEl.replaceChildren(...t.entries.map(renderEntry));
+// The context window a run is filling. Approximate on purpose — the exact ceiling varies by model,
+// and what matters is the shape of the curve, not the denominator.
+const CONTEXT_CEILING = 200_000;
 
-  if (t.contextTokens || t.costUsd != null) {
+function paint(type, transcript) {
+  const card = cards.get(type);
+  if (!card) return;
+
+  const atBottom = card.log.scrollHeight - card.log.scrollTop - card.log.clientHeight < 60;
+  card.log.replaceChildren(...transcript.entries.map(renderEntry));
+
+  if (transcript.contextTokens || transcript.costUsd != null) {
     const meta = document.createElement("div");
     meta.className = "run-meta";
     const bits = [];
-    if (t.model) bits.push(t.model);
-    if (t.contextTokens) bits.push(`${fmtTokens(t.contextTokens)} ctx`);
-    if (t.turns) bits.push(`${t.turns} turns`);
-    if (t.costUsd != null) bits.push(`$${t.costUsd.toFixed(2)}`);
+    if (transcript.model) bits.push(transcript.model);
+    if (transcript.contextTokens) bits.push(`${fmtTokens(transcript.contextTokens)} ctx`);
+    if (transcript.turns) bits.push(`${transcript.turns} turns`);
+    if (transcript.costUsd != null) bits.push(`$${transcript.costUsd.toFixed(2)}`);
     meta.textContent = bits.join(" · ");
-    logEl.append(meta);
+    card.log.append(meta);
   }
+  if (atBottom) card.log.scrollTop = card.log.scrollHeight;
 
-  if (atBottom) logEl.scrollTop = logEl.scrollHeight; // don't yank the view if you scrolled up
+  const pct = Math.min(1, (transcript.contextTokens ?? 0) / CONTEXT_CEILING);
+  card.meter.style.display = transcript.contextTokens ? "" : "none";
+  card.meter.className = `meter ${pct > 0.85 ? "hot" : pct > 0.6 ? "warn" : ""}`;
+  card.meter.firstChild.style.width = `${Math.round(pct * 100)}%`;
+  card.meter.title = transcript.contextTokens ? `${fmtTokens(transcript.contextTokens)} context tokens` : "";
 }
 
-async function selectType(type) {
-  selected = type;
-  for (const b of typesEl.children) b.setAttribute("aria-selected", String(b.dataset.type === type));
-  renderTranscript(await window.landed.agentTranscript(type));
+function buildCard({ type, persona }) {
+  const root = document.createElement("div");
+  root.className = "card";
+
+  const head = document.createElement("div");
+  head.className = "card-head";
+
+  const avatar = document.createElement("span");
+  avatar.className = "avatar";
+  avatar.textContent = persona.slice(0, 1);
+
+  const who = document.createElement("div");
+  who.className = "who";
+  const personaEl = document.createElement("div");
+  personaEl.className = "persona";
+  personaEl.textContent = persona;
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  spinner.style.display = "none";
+  personaEl.append(spinner);
+  const jobtype = document.createElement("div");
+  jobtype.className = "jobtype";
+  jobtype.textContent = type;
+  who.append(personaEl, jobtype);
+
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.style.display = "none";
+
+  const meter = document.createElement("span");
+  meter.className = "meter";
+  meter.style.display = "none";
+  meter.append(document.createElement("i"));
+
+  const chev = document.createElement("span");
+  chev.className = "chev";
+  chev.textContent = "▸";
+
+  head.append(avatar, who, badge, meter, chev);
+
+  const body = document.createElement("div");
+  body.className = "card-body";
+  const log = document.createElement("div");
+  log.className = "log";
+  body.append(log);
+
+  head.onclick = async () => {
+    if (open === type) {
+      root.classList.remove("open");
+      open = null;
+      return;
+    }
+    for (const c of cards.values()) c.root.classList.remove("open");
+    root.classList.add("open");
+    open = type;
+    paint(type, await window.landed.agentTranscript(type));
+  };
+
+  root.append(head, body);
+  cards.set(type, { root, log, badge, meter, spinner });
+  return root;
 }
 
 async function renderStatus() {
-  const s = await window.landed.agentStatus();
+  const [s, counts] = await Promise.all([window.landed.agentStatus(), window.landed.queueCounts()]);
   const running = s.running ?? [];
+
   dotEl.className = `dot ${running.length ? "live" : s.lastError ? "error" : ""}`;
   statusEl.textContent = s.stopped
     ? "Not draining"
@@ -203,24 +269,23 @@ async function renderStatus() {
       : s.lastError
         ? `Can't reach ${s.origin}`
         : "Watching for work";
-  for (const b of typesEl.children) b.classList.toggle("live", running.includes(b.dataset.type));
+
+  for (const [type, card] of cards) {
+    card.spinner.style.display = running.includes(type) ? "" : "none";
+    const n = counts[type] ?? 0;
+    card.badge.style.display = n ? "" : "none";
+    card.badge.textContent = `${n} queued`;
+  }
 }
 
 async function initAgent() {
   const types = await window.landed.agentTypes();
-  typesEl.replaceChildren();
-  for (const t of types) {
-    const b = document.createElement("button");
-    b.dataset.type = t;
-    b.textContent = t;
-    b.onclick = () => selectType(t);
-    typesEl.append(b);
-  }
-  await selectType(types[0]);
+  agentEl.replaceChildren(...types.map(buildCard));
 
-  // Main sends the whole folded transcript, so a repaint cannot disagree with it.
+  // Main sends the whole folded transcript, so a repaint cannot disagree with it. Only the open
+  // card paints; the rest keep accumulating in main and are current whenever you expand them.
   window.landed.onAgentFrame(({ type, transcript }) => {
-    if (type === selected) renderTranscript(transcript);
+    if (type === open) paint(type, transcript);
   });
 
   renderStatus();

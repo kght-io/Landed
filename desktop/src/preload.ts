@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("landed", {
   // polling would either lag behind or spin. The unsubscribe return keeps the renderer from
   // stacking listeners when it re-renders.
   agentTypes: () => ipcRenderer.invoke("agent:types"),
+  queueCounts: () => ipcRenderer.invoke("queue:counts"),
   agentTranscript: (type: string) => ipcRenderer.invoke("agent:transcript", type),
   agentStatus: () => ipcRenderer.invoke("agent:status"),
   onAgentFrame: (cb: (e: { type: string; transcript: unknown }) => void) => {

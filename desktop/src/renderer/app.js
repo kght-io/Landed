@@ -93,3 +93,76 @@ window.landed.root().then((r) => {
   document.getElementById("root").textContent = r;
 });
 go("");
+
+// ─── Agent view ──────────────────────────────────────────────────────────────
+//
+// What the browser cannot show you: this app's own agent runs. The job QUEUE is cloud state and the
+// web UI already renders it; what lives only here is the transcript of a process on this machine.
+// So this view is deliberately not a second queue board — it is the output the supervisor would
+// otherwise be writing to a terminal nobody is looking at.
+
+const typesEl = document.getElementById("types");
+const logEl = document.getElementById("log");
+const dotEl = document.getElementById("dot");
+const statusEl = document.getElementById("status");
+
+let selected = null;
+let types = [];
+
+function setView(view) {
+  document.body.className = `view-${view}`;
+  for (const t of document.querySelectorAll(".tab")) {
+    t.setAttribute("aria-selected", String(t.dataset.view === view));
+  }
+}
+
+async function selectType(type) {
+  selected = type;
+  for (const b of typesEl.children) b.setAttribute("aria-selected", String(b.dataset.type === type));
+  const lines = await window.landed.agentLog(type);
+  logEl.textContent = lines.join("\n");
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function renderStatus() {
+  const s = await window.landed.agentStatus();
+  const running = s.running ?? [];
+  dotEl.className = `dot ${running.length ? "live" : s.lastError ? "error" : ""}`;
+  statusEl.textContent = s.stopped
+    ? "Not draining"
+    : running.length
+      ? `Running ${running.join(", ")}`
+      : s.lastError
+        ? `Can't reach ${s.origin}`
+        : "Watching for work";
+  // A type currently draining is outlined, so you can tell which tab is live without opening it.
+  for (const b of typesEl.children) b.classList.toggle("live", running.includes(b.dataset.type));
+}
+
+async function initAgent() {
+  types = await window.landed.agentTypes();
+  typesEl.replaceChildren();
+  for (const t of types) {
+    const b = document.createElement("button");
+    b.dataset.type = t;
+    b.textContent = t;
+    b.onclick = () => selectType(t);
+    typesEl.append(b);
+  }
+  await selectType(types[0]);
+
+  // Append only when the visible type is the one that spoke; other types keep buffering in main.
+  window.landed.onAgentLine(({ type, line }) => {
+    if (type !== selected) return;
+    const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+    logEl.textContent += (logEl.textContent ? "\n" : "") + line;
+    if (atBottom) logEl.scrollTop = logEl.scrollHeight; // don't yank the view if you scrolled up
+  });
+
+  renderStatus();
+  setInterval(renderStatus, 1500);
+}
+
+for (const t of document.querySelectorAll(".tab")) t.onclick = () => setView(t.dataset.view);
+setView("agent");
+initAgent();

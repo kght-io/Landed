@@ -30,6 +30,22 @@ let rootReady = false;
 let pendingLink: string | null = null;
 let tray: Tray | null = null;
 let loop: ReturnType<typeof createDrainLoop> | null = null;
+let lastError: string | null = null;
+
+// A bounded transcript per job type. Bounded because a long drain emits thousands of lines and the
+// window may not be open to consume them — an unbounded buffer in a process designed to run for
+// days is a leak with extra steps. The renderer asks for a backlog when it opens, so closing the
+// window loses nothing that matters.
+const LOG_LIMIT = 500;
+const logs = new Map<string, string[]>();
+
+function pushAgentLine(type: string, line: string): void {
+  const lines = logs.get(type) ?? [];
+  lines.push(line);
+  if (lines.length > LOG_LIMIT) lines.splice(0, lines.length - LOG_LIMIT);
+  logs.set(type, lines);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send("agent:line", { type, line });
+}
 
 // The queue types this app drains. Each gets its own loop, matching the queue's own model of one
 // process per type; two types can run at once, the same type never does.
@@ -165,6 +181,14 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("app:openInBrowser", () => shell.openExternal(APP_ORIGIN));
   ipcMain.handle("app:origin", () => APP_ORIGIN);
+  ipcMain.handle("agent:types", () => DRAIN_TYPES);
+  ipcMain.handle("agent:log", (_e, type: string) => logs.get(type) ?? []);
+  ipcMain.handle("agent:status", () => ({
+    running: loop?.status().running ?? [],
+    stopped: loop?.status().stopped ?? true,
+    origin: APP_ORIGIN,
+    lastError,
+  }));
   ipcMain.handle("app:chooseRoot", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: "Choose your Landed folder",
@@ -176,12 +200,26 @@ app.whenReady().then(async () => {
 
   rootReady = true;
 
-  tray = new Tray(nativeImage.createEmpty());
+  // A template image: macOS tints it for light/dark menu bars. An empty image is a tray icon you
+  // cannot see, which is the same as not having one.
+  const icon = nativeImage.createFromPath(path.join(__dirname, "assets", "trayTemplate.png"));
+  icon.setTemplateImage(true);
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+  tray.on("click", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else focusWindow();
+  });
   loop = createDrainLoop({
     types: DRAIN_TYPES,
     poll: pollForWork,
-    run: (type) => runDrain(type, APP_ORIGIN),
-    onError: (e, type) => console.error(`[drain:${type}]`, e),
+    run: (type) =>
+      runDrain(type, APP_ORIGIN, (line) => {
+        pushAgentLine(type, line);
+      }),
+    onError: (e, type) => {
+      pushAgentLine(type, `⚠︎ ${String(e)}`);
+      lastError = String(e);
+    },
   });
   refreshTray();
   setInterval(refreshTray, 2000);

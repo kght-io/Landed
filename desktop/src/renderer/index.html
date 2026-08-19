@@ -36,22 +36,60 @@
   .empty { color: #52525b; padding: 24px 16px; text-align: center; }
   footer { padding: 10px 16px; border-top: 1px solid #27272a; display: flex; align-items: center; gap: 10px;
     color: #71717a; font-size: 12px; }
-  footer code { color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  footer code { color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+
+  .tabs { -webkit-app-region: no-drag; display: flex; gap: 2px; margin-left: 8px; }
+  .tab { background: transparent; border: none; color: #71717a; padding: 3px 10px; border-radius: 7px; }
+  .tab:hover { color: #e4e4e7; background: #18181b; }
+  .tab[aria-selected="true"] { background: #27272a; color: #e4e4e7; }
+
+  /* One <main> holds both views; the body class decides which is on. */
+  #agent { display: none; height: 100%; grid-template-rows: auto 1fr; }
+  body.view-agent #list, body.view-agent nav { display: none; }
+  body.view-agent #agent { display: grid; }
+  body.view-files #agent { display: none; }
+
+  .types { display: flex; gap: 6px; padding: 4px 16px 10px; flex-wrap: wrap; }
+  .types button { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #18181b;
+    border: 1px solid #27272a; color: #a1a1aa; }
+  .types button[aria-selected="true"] { background: #27272a; color: #e4e4e7; border-color: #3f3f46; }
+  .types button.live { border-color: #16a34a; color: #86efac; }
+
+  #log { margin: 0; padding: 0 16px 16px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a1a1aa; }
+  #log:empty::after { content: "No output yet. The agent writes here while it drains."; color: #52525b; }
+
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #52525b; flex: none; }
+  .dot.live { background: #22c55e; }
+  .dot.error { background: #ef4444; }
 </style>
 
 <header>
   <h1>Landed</h1>
+  <span class="tabs">
+    <button class="tab" data-view="agent">Agent</button>
+    <button class="tab" data-view="files">Files</button>
+  </span>
   <span class="spacer"></span>
   <button id="open-browser">Open Landed in browser →</button>
 </header>
 
 <nav id="crumbs"></nav>
-<main><ul id="list"></ul></main>
+
+<main>
+  <ul id="list"></ul>
+
+  <section id="agent">
+    <div class="types" id="types"></div>
+    <pre id="log"></pre>
+  </section>
+</main>
 
 <footer>
-  <span>Folder</span>
-  <code id="root">…</code>
+  <span class="dot" id="dot"></span>
+  <span id="status">…</span>
   <span class="spacer" style="flex:1"></span>
+  <code id="root">…</code>
   <button class="ghost" id="reveal-root">Reveal</button>
 </footer>
 

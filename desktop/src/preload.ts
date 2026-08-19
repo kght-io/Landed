@@ -13,4 +13,16 @@ contextBridge.exposeInMainWorld("landed", {
   origin: () => ipcRenderer.invoke("app:origin"),
   openInBrowser: () => ipcRenderer.invoke("app:openInBrowser"),
   chooseRoot: () => ipcRenderer.invoke("app:chooseRoot"),
+
+  // Agent view. onLine is a subscription rather than a poll: a drain emits lines in bursts, and
+  // polling would either lag behind or spin. The unsubscribe return keeps the renderer from
+  // stacking listeners when it re-renders.
+  agentTypes: () => ipcRenderer.invoke("agent:types"),
+  agentLog: (type: string) => ipcRenderer.invoke("agent:log", type),
+  agentStatus: () => ipcRenderer.invoke("agent:status"),
+  onAgentLine: (cb: (e: { type: string; line: string }) => void) => {
+    const handler = (_e: unknown, payload: { type: string; line: string }) => cb(payload);
+    ipcRenderer.on("agent:line", handler);
+    return () => ipcRenderer.off("agent:line", handler);
+  },
 });

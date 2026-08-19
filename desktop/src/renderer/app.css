@@ -1,9 +1,58 @@
 @import "tailwindcss";
 
-/* Scan the reused web components too — their classes are the layout, and Tailwind only emits what
-   it can see. Without this the agent view renders unstyled. */
+/* Scan the reused web components too — their classes ARE the layout, and Tailwind only emits what
+   it can see. Without this the ported agents page renders unstyled. */
 @source "../../../frontend/components";
 @source "./";
+
+/* ─── LIGHT, WITHOUT EDITING THE WEB COMPONENTS ──────────────────────────────
+ *
+ * The ported page is written dark-only: 166 of its colour classes are on the zinc ramp, chosen
+ * against a near-black background, and none of them carry a `dark:` variant. Adding light support
+ * the ordinary way would mean touching every one — in files the web app also uses, for a change the
+ * web app did not ask for.
+ *
+ * Tailwind v4 makes that unnecessary. The palette is exposed as CSS variables and the utilities
+ * reference them (`background-color: var(--color-zinc-950)`), so REVERSING the ramp here flips the
+ * whole interface: bg-zinc-950 lands on near-white, text-zinc-200 on near-black, and every border
+ * and hover state in between keeps its relative contrast. One block, no component edits, and the
+ * web app is untouched.
+ *
+ * The accents need a separate nudge. sky-300 and friends were picked to glow on black; on white
+ * they wash out. Each one used by the ported components is remapped to the step it would have been
+ * chosen as for a light background — roughly three stops darker.
+ */
+:root {
+  /* Reversed neutral ramp. Values are Tailwind's own, swapped end for end. */
+  --color-zinc-50: oklch(14.1% 0.005 285.823);
+  --color-zinc-100: oklch(21% 0.006 285.885);
+  --color-zinc-200: oklch(27.4% 0.006 286.033);
+  --color-zinc-300: oklch(37% 0.013 285.805);
+  --color-zinc-400: oklch(44.2% 0.017 285.786);
+  --color-zinc-500: oklch(55.2% 0.016 285.938);
+  --color-zinc-600: oklch(70.5% 0.015 286.067);
+  --color-zinc-700: oklch(87.1% 0.006 286.286);
+  --color-zinc-800: oklch(92% 0.004 286.32);
+  --color-zinc-900: oklch(96.7% 0.001 286.375);
+  --color-zinc-950: oklch(98.5% 0 0);
+
+  /* Accents, darkened to read on the light ground. */
+  --color-sky-200: oklch(58.8% 0.158 241.966);
+  --color-sky-300: oklch(58.8% 0.158 241.966);
+  --color-sky-400: oklch(58.8% 0.158 241.966);
+  --color-rose-200: oklch(58.6% 0.253 17.585);
+  --color-rose-300: oklch(58.6% 0.253 17.585);
+  --color-rose-400: oklch(58.6% 0.253 17.585);
+  --color-amber-200: oklch(66.6% 0.179 58.318);
+  --color-amber-300: oklch(66.6% 0.179 58.318);
+  --color-amber-400: oklch(66.6% 0.179 58.318);
+  --color-emerald-200: oklch(59.6% 0.145 163.225);
+  --color-emerald-300: oklch(59.6% 0.145 163.225);
+  --color-emerald-400: oklch(59.6% 0.145 163.225);
+  --color-violet-200: oklch(49.1% 0.27 292.581);
+  --color-violet-300: oklch(49.1% 0.27 292.581);
+  --color-violet-400: oklch(49.1% 0.27 292.581);
+}
 
 html, body, #root { height: 100%; }
 body { margin: 0; }

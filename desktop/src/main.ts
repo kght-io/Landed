@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { APP_ORIGIN, ensureAssetRoot, getAssetRoot } from "./config";
@@ -154,8 +154,9 @@ function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1100,
     height: 760,
-    // Matches the renderer's --bg on first paint, before any CSS loads.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#09090b" : "#ffffff",
+    // Painted before any CSS loads, so it has to match what the stylesheet lands on — see the
+    // reversed zinc ramp in renderer/app.css.
+    backgroundColor: "#ffffff",
     show: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
@@ -322,10 +323,6 @@ app.whenReady().then(async () => {
 
   // light-dark() re-resolves on its own inside the page; the window's own backgroundColor does not,
   // so it has to be told when the user flips appearance.
-  nativeTheme.on("updated", () => {
-    const bg = nativeTheme.shouldUseDarkColors ? "#09090b" : "#ffffff";
-    for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(bg);
-  });
   // Not awaited: the loop runs for the life of the app.
   void loop.start();
 

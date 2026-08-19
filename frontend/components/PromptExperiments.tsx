@@ -25,7 +25,6 @@ export default function PromptExperiments() {
 
   useEffect(() => {
     // Fetch-on-mount loader; its setState runs post-await, not synchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetch("/api/prompts/results")
       .then((r) => r.json())
       .then(setData)

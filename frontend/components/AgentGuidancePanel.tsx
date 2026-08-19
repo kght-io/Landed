@@ -43,7 +43,7 @@ export default function AgentGuidancePanel() {
       />
       <p className="text-[12px] text-zinc-500">
         <Link href="/dashboard/prompts" className="inline-flex items-center gap-1.5 text-sky-400 hover:text-sky-300">
-          <BarChart3 size={12} /> See how each version's applications landed
+          <BarChart3 size={12} /> See how each version&apos;s applications landed
         </Link>{" "}
         — every application, with the version that produced it.
       </p>

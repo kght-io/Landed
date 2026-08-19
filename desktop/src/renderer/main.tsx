@@ -18,7 +18,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import AgentChatsProvider from "./providers/AgentChatsProvider";
 import AgentQueueProvider from "@/components/AgentQueueProvider";
-import AgentsLive from "@/components/AgentsLive";
+import AgentsView from "@/components/AgentsView";
 import Files from "./Files";
 import { useState } from "react";
 
@@ -42,32 +42,35 @@ function App() {
   const [view, setView] = useState<"agent" | "files">("agent");
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-200">
-      <header className="flex items-center gap-3 px-4 pt-3 pb-2 [-webkit-app-region:drag]">
-        <h1 className="text-[13px] font-semibold">Landed</h1>
-        <nav className="flex gap-1 [-webkit-app-region:no-drag]">
-          {(["agent", "files"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`rounded-lg px-2.5 py-1 text-[12px] capitalize transition ${
-                view === v ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </nav>
+      {/* The window is titleBarStyle: "hiddenInset", so macOS draws its traffic lights OVER the top
+          left of the content. This strip is the room they need — draggable, since removing the title
+          bar also removed the only place to grab the window. pl-20 clears the lights on darwin; the
+          height is what keeps the ported page's own header out from under them. */}
+      <div className="flex h-9 shrink-0 items-center gap-1 pr-3 pl-20 [-webkit-app-region:drag]">
+        {(["agent", "files"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`rounded-md px-2.5 py-1 text-[12px] capitalize transition [-webkit-app-region:no-drag] ${
+              view === v ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
         <span className="flex-1" />
         <button
           onClick={() => void window.landed.openInBrowser()}
-          className="rounded-lg bg-zinc-800 px-3 py-1 text-[12px] text-zinc-200 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-700 [-webkit-app-region:no-drag]"
+          className="rounded-md px-2.5 py-1 text-[12px] text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-200 [-webkit-app-region:no-drag]"
         >
-          Open Landed in browser →
+          Open in browser →
         </button>
-      </header>
+      </div>
 
-      <main className="min-h-0 flex-1 overflow-auto px-4 pb-4">
-        {view === "agent" ? <AgentsLive /> : <Files />}
+      {/* AgentsView brings its own header, tabs (Chat / Monitor / MCP), and scrolling, so it gets the
+          rest of the window untouched — porting the page means porting its layout too. */}
+      <main className="min-h-0 flex-1 overflow-hidden">
+        {view === "agent" ? <AgentsView /> : <div className="h-full px-6 py-5"><Files /></div>}
       </main>
     </div>
   );

@@ -96,10 +96,13 @@ go("");
 
 // ─── Agent view ──────────────────────────────────────────────────────────────
 //
-// What the browser cannot show you: this app's own agent runs. The job QUEUE is cloud state and the
-// web UI already renders it; what lives only here is the transcript of a process on this machine.
-// So this view is deliberately not a second queue board — it is the output the supervisor would
-// otherwise be writing to a terminal nobody is looking at.
+// The same transcript the web agents page shows, because it is the same frames: prose merged into
+// paragraphs, tool calls with their results attached, and the context meter. What differs is where
+// it comes from — there, an SSE tail of a log file; here, the child process this app spawned.
+//
+// The reduction happens in the main process (shared/agents/stream), so this file only paints. That
+// keeps a closed window from losing history: the agent runs regardless, and reopening shows what
+// happened while you were away.
 
 const typesEl = document.getElementById("types");
 const logEl = document.getElementById("log");
@@ -107,7 +110,6 @@ const dotEl = document.getElementById("dot");
 const statusEl = document.getElementById("status");
 
 let selected = null;
-let types = [];
 
 function setView(view) {
   document.body.className = `view-${view}`;
@@ -116,12 +118,78 @@ function setView(view) {
   }
 }
 
+const fmtTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+
+// Tool inputs are arbitrary JSON. One line, clipped — the argument that matters (a slug, a type) is
+// almost always near the front, and a pretty-printed blob buries the next line of prose.
+function summarizeInput(input) {
+  if (input == null) return "";
+  const text = typeof input === "string" ? input : JSON.stringify(input);
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+}
+
+function renderEntry(e) {
+  const el = document.createElement("div");
+  el.className = `entry ${e.role}`;
+
+  if (e.role === "assistant") {
+    el.textContent = e.text;
+    return el;
+  }
+
+  if (e.role === "note") {
+    el.classList.toggle("error", !!e.error);
+    el.textContent = e.text;
+    return el;
+  }
+
+  // Tool call: name, a clipped input, and the result state once it arrives. Pending calls show a
+  // dim marker rather than nothing, so a hung tool is visible instead of looking like silence.
+  const head = document.createElement("div");
+  head.className = "tool-head";
+  const dot = document.createElement("span");
+  dot.className = `tool-dot ${e.result ? (e.result.ok ? "ok" : "bad") : "pending"}`;
+  const name = document.createElement("span");
+  name.className = "tool-name";
+  name.textContent = e.name;
+  const args = document.createElement("span");
+  args.className = "tool-args";
+  args.textContent = summarizeInput(e.input);
+  head.append(dot, name, args);
+  el.append(head);
+
+  if (e.result?.preview) {
+    const res = document.createElement("div");
+    res.className = "tool-result";
+    res.textContent = e.result.preview;
+    el.append(res);
+  }
+  return el;
+}
+
+function renderTranscript(t) {
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60;
+  logEl.replaceChildren(...t.entries.map(renderEntry));
+
+  if (t.contextTokens || t.costUsd != null) {
+    const meta = document.createElement("div");
+    meta.className = "run-meta";
+    const bits = [];
+    if (t.model) bits.push(t.model);
+    if (t.contextTokens) bits.push(`${fmtTokens(t.contextTokens)} ctx`);
+    if (t.turns) bits.push(`${t.turns} turns`);
+    if (t.costUsd != null) bits.push(`$${t.costUsd.toFixed(2)}`);
+    meta.textContent = bits.join(" · ");
+    logEl.append(meta);
+  }
+
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight; // don't yank the view if you scrolled up
+}
+
 async function selectType(type) {
   selected = type;
   for (const b of typesEl.children) b.setAttribute("aria-selected", String(b.dataset.type === type));
-  const lines = await window.landed.agentLog(type);
-  logEl.textContent = lines.join("\n");
-  logEl.scrollTop = logEl.scrollHeight;
+  renderTranscript(await window.landed.agentTranscript(type));
 }
 
 async function renderStatus() {
@@ -135,12 +203,11 @@ async function renderStatus() {
       : s.lastError
         ? `Can't reach ${s.origin}`
         : "Watching for work";
-  // A type currently draining is outlined, so you can tell which tab is live without opening it.
   for (const b of typesEl.children) b.classList.toggle("live", running.includes(b.dataset.type));
 }
 
 async function initAgent() {
-  types = await window.landed.agentTypes();
+  const types = await window.landed.agentTypes();
   typesEl.replaceChildren();
   for (const t of types) {
     const b = document.createElement("button");
@@ -151,12 +218,9 @@ async function initAgent() {
   }
   await selectType(types[0]);
 
-  // Append only when the visible type is the one that spoke; other types keep buffering in main.
-  window.landed.onAgentLine(({ type, line }) => {
-    if (type !== selected) return;
-    const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
-    logEl.textContent += (logEl.textContent ? "\n" : "") + line;
-    if (atBottom) logEl.scrollTop = logEl.scrollHeight; // don't yank the view if you scrolled up
+  // Main sends the whole folded transcript, so a repaint cannot disagree with it.
+  window.landed.onAgentFrame(({ type, transcript }) => {
+    if (type === selected) renderTranscript(transcript);
   });
 
   renderStatus();

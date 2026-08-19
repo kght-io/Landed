@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { drainPrompt } from "@landed/shared/agents/personas";
+import { translate, type Frame, type TranslateState } from "@landed/shared/agents/stream";
 import { getAssetRoot } from "./config";
 
 // SPAWNING THE AGENT.
@@ -76,7 +77,7 @@ export function writeMcpConfig(appOrigin: string): string {
  * Rejects on a non-zero exit so the supervisor can back off and report — a silent failure here is
  * the failure mode that makes the app look alive while draining nothing.
  */
-export function runDrain(type: string, appOrigin: string, onLine?: (line: string) => void): Promise<void> {
+export function runDrain(type: string, appOrigin: string, onFrame?: (frame: Frame) => void): Promise<void> {
   const mcp = writeMcpConfig(appOrigin);
   const root = getAssetRoot();
 
@@ -86,6 +87,12 @@ export function runDrain(type: string, appOrigin: string, onLine?: (line: string
       [
         "-p",
         drainPrompt(type),
+        // The structured stream is what makes a transcript possible instead of a wall of text: the
+        // same frames the web agents page renders. --verbose is required by the CLI for stream-json
+        // in print mode; without it the process emits nothing until it exits.
+        "--output-format",
+        "stream-json",
+        "--verbose",
         "--model",
         claudeModel(),
         "--mcp-config",
@@ -112,10 +119,28 @@ export function runDrain(type: string, appOrigin: string, onLine?: (line: string
       },
     );
 
+    // stream-json is newline-delimited, and a chunk boundary lands mid-line often enough that
+    // parsing per chunk drops frames. Hold the trailing partial until its newline arrives.
+    const state: TranslateState = {};
+    let buffer = "";
     child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (d: string) => d.split("\n").filter(Boolean).forEach((l) => onLine?.(l)));
+    child.stdout?.on("data", (chunk: string) => {
+      buffer += chunk;
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line) for (const frame of translate(line, state)) onFrame?.(frame);
+      }
+    });
+
+    // stderr is not protocol — it is the CLI complaining. Surfaced as a note so a missing binary or
+    // an expired login shows up in the transcript instead of only in a terminal.
     child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (d: string) => onLine?.(d.trimEnd()));
+    child.stderr?.on("data", (d: string) => {
+      const text = d.trimEnd();
+      if (text) onFrame?.({ kind: "note", text, error: true });
+    });
 
     child.on("error", reject); // e.g. `claude` is not installed
     child.on("close", (code) =>

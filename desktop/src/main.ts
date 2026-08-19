@@ -6,6 +6,7 @@ import { parseDeepLink } from "./deeplink";
 import { revealAssetFolder, revealPrepFolder, revealResumeFolder } from "./local-ops";
 import { runDrain } from "./agent";
 import { createDrainLoop, type WaitResult } from "./supervisor";
+import { emptyTranscript, reduceFrame, type Frame, type Transcript } from "@landed/shared/agents/stream";
 
 // THE DESKTOP APP.
 //
@@ -32,19 +33,23 @@ let tray: Tray | null = null;
 let loop: ReturnType<typeof createDrainLoop> | null = null;
 let lastError: string | null = null;
 
-// A bounded transcript per job type. Bounded because a long drain emits thousands of lines and the
-// window may not be open to consume them — an unbounded buffer in a process designed to run for
-// days is a leak with extra steps. The renderer asks for a backlog when it opens, so closing the
-// window loses nothing that matters.
-const LOG_LIMIT = 500;
-const logs = new Map<string, string[]>();
+// One transcript per job type, folded here rather than in the renderer so a closed window loses
+// nothing — the agent keeps running either way, and reopening should show what happened.
+//
+// Bounded because a long drain produces hundreds of entries and this process is meant to run for
+// days; an unbounded array is a leak with extra steps. Entries are trimmed from the front, so what
+// survives is the recent end, which is the part anyone reads.
+const ENTRY_LIMIT = 400;
+const transcripts = new Map<string, Transcript>();
+let entryId = 0;
+const nextEntryId = () => ++entryId;
 
-function pushAgentLine(type: string, line: string): void {
-  const lines = logs.get(type) ?? [];
-  lines.push(line);
-  if (lines.length > LOG_LIMIT) lines.splice(0, lines.length - LOG_LIMIT);
-  logs.set(type, lines);
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send("agent:line", { type, line });
+function pushFrame(type: string, frame: Frame): void {
+  const before = transcripts.get(type) ?? emptyTranscript();
+  const after = reduceFrame(before, frame, nextEntryId);
+  if (after.entries.length > ENTRY_LIMIT) after.entries = after.entries.slice(-ENTRY_LIMIT);
+  transcripts.set(type, after);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send("agent:frame", { type, transcript: after });
 }
 
 // The queue types this app drains. Each gets its own loop, matching the queue's own model of one
@@ -183,7 +188,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("app:openInBrowser", () => shell.openExternal(APP_ORIGIN));
   ipcMain.handle("app:origin", () => APP_ORIGIN);
   ipcMain.handle("agent:types", () => DRAIN_TYPES);
-  ipcMain.handle("agent:log", (_e, type: string) => logs.get(type) ?? []);
+  ipcMain.handle("agent:transcript", (_e, type: string) => transcripts.get(type) ?? emptyTranscript());
   ipcMain.handle("agent:status", () => ({
     running: loop?.status().running ?? [],
     stopped: loop?.status().stopped ?? true,
@@ -214,11 +219,11 @@ app.whenReady().then(async () => {
     types: DRAIN_TYPES,
     poll: pollForWork,
     run: (type) =>
-      runDrain(type, APP_ORIGIN, (line) => {
-        pushAgentLine(type, line);
+      runDrain(type, APP_ORIGIN, (frame) => {
+        pushFrame(type, frame);
       }),
     onError: (e, type) => {
-      pushAgentLine(type, `⚠︎ ${String(e)}`);
+      pushFrame(type, { kind: "note", text: String(e), error: true });
       lastError = String(e);
     },
   });

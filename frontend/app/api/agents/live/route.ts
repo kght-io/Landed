@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { jobDef } from "@landed/backend/jobs/registry";
 import { CLAUDE_BIN, mcpConfigPath, claudeEnv, baseArgs } from "@landed/backend/agents/claude-code";
 import { drainPrompt } from "@landed/shared/agents/personas";
+import { translate, type TranslateState } from "@landed/shared/agents/stream";
 import { runPaths, ensureRunDir, splitFrames, isTerminalLine, readLivePid } from "@landed/backend/agents/run-log";
 import { REPO_ROOT } from "@landed/backend/paths";
 
@@ -39,7 +40,6 @@ export const maxDuration = 600; // a full queue drain + tool calls can run for m
 //   { kind: "result", text, isError, costUsd, turns }      — the turn finished
 //   { kind: "error", message }  |  { kind: "exit", code }  — failure / stream end
 
-const PREVIEW = 2000; // cap tool-result text we forward, so a big listApplications doesn't flood the UI
 const POLL_MS = 250; // how often the tailer re-reads the growing log file
 const IDLE_MS = 300_000; // kill a run whose log hasn't grown for 5 min (stalled tool/model) while watched
 
@@ -172,7 +172,7 @@ export async function POST(request: Request) {
           buf = rest;
           let done = false;
           for (const line of lines) {
-            translate(line, send, state);
+            for (const frame of translate(line, state)) send(frame);
             if (isTerminalLine(line)) done = true;
           }
           if (done) { finish(0); return; }
@@ -222,85 +222,3 @@ function tailFile(p: string, max: number): string {
   } catch { return ""; }
 }
 
-// Per-request parsing state threaded across stream lines. Holds the most recent `assistant`
-// message usage — the source of the CONTEXT figure (see the `result` branch).
-type TranslateState = { lastAssistantUsage?: Record<string, unknown> };
-
-// The tokens fed to the model on a turn = input + cache_read + cache_creation of that turn's
-// `assistant` usage. (cache_creation is usually the bulk of the context and must NOT be dropped.)
-function contextOf(usage: Record<string, unknown> | undefined): number {
-  if (!usage) return 0;
-  const n = (k: string) => (typeof usage[k] === "number" ? (usage[k] as number) : 0);
-  return n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
-}
-
-// Map one CLI stream-json line to zero+ outbound SSE events.
-function translate(line: string, send: (obj: unknown) => void, state: TranslateState) {
-  let msg: Record<string, unknown>;
-  try { msg = JSON.parse(line); } catch { return; } // ignore non-JSON noise
-  const t = msg.type;
-
-  if (t === "system" && msg.subtype === "init") {
-    if (msg.session_id) send({ kind: "session", sessionId: msg.session_id, model: typeof msg.model === "string" ? msg.model : undefined });
-    return;
-  }
-
-  if (t === "assistant") {
-    const message = msg.message as { content?: unknown[]; usage?: Record<string, unknown> } | undefined;
-    if (message?.usage) {
-      state.lastAssistantUsage = message.usage; // latest turn wins → final context
-      // Emit context LIVE, per turn — not only bundled into the terminal `result`. A long run (e.g.
-      // the Board Scanner) can be cut off (5-min auto-stop / stall / Stop / API blip) before `result`,
-      // which would otherwise leave the token meter blank despite heavy usage.
-      const ctx = contextOf(message.usage);
-      if (ctx) send({ kind: "usage", contextTokens: ctx });
-    }
-    const content = message?.content ?? [];
-    for (const block of content as Record<string, unknown>[]) {
-      if (block.type === "text" && typeof block.text === "string") send({ kind: "text", text: block.text });
-      else if (block.type === "tool_use") send({ kind: "tool", name: block.name, input: block.input });
-    }
-    return;
-  }
-
-  if (t === "user") {
-    const content = (msg.message as { content?: unknown[] } | undefined)?.content ?? [];
-    for (const block of content as Record<string, unknown>[]) {
-      if (block.type === "tool_result") {
-        send({ kind: "tool_result", ok: !block.is_error, preview: previewOf(block.content) });
-      }
-    }
-    return;
-  }
-
-  if (t === "result") {
-    // Context pressure = the LAST turn's context, from the final `assistant` usage — NOT `result.usage`,
-    // which is the session's cumulative total across every turn (it climbs with turn count and can run to
-    // millions, so it never reflects how full the window actually is). Surfacing the real figure lets a
-    // long-lived session's context pressure show honestly (the CLI auto-compacts, but gives no warning).
-    send({
-      kind: "result",
-      text: typeof msg.result === "string" ? msg.result : "",
-      isError: !!msg.is_error,
-      costUsd: typeof msg.total_cost_usd === "number" ? msg.total_cost_usd : undefined,
-      turns: typeof msg.num_turns === "number" ? msg.num_turns : undefined,
-      contextTokens: contextOf(state.lastAssistantUsage) || undefined,
-    });
-  }
-}
-
-// A short, plain-text preview of a tool_result's content (string or content-block array).
-function previewOf(content: unknown): string {
-  let text = "";
-  if (typeof content === "string") text = content;
-  else if (Array.isArray(content)) {
-    text = content
-      .map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : ""))
-      .filter(Boolean)
-      .join("\n");
-  } else if (content != null) {
-    text = JSON.stringify(content);
-  }
-  text = text.replace(/\s+/g, " ").trim();
-  return text.length > PREVIEW ? `${text.slice(0, PREVIEW)}…` : text;
-}

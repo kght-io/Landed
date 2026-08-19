@@ -10,10 +10,18 @@ what to read, the helper that writes the files, what shape to hand back. See ste
    sometimes a `url`). **`jd` is normally already filled** — carried over from the scan / fit step,
    so you shouldn't need to fetch. Only fetch it from the `url` if `jd` is empty. Keep each
    posting's `id` — you echo it back in the result.
-2. My **base resume**: `resume/resume-ref.docx` — the ONLY source. Never edit it; copy from it.
-3. The posting's prior **fit** record if present (gaps + leveling call) — use it to steer the edits.
+2. My **base resume** — the ONLY source. Never edit it; copy from it. Its absolute path comes back
+   from `getContext` as `paths.baseResume` (and the folder to write into is under `paths.resumeDir`).
+   **Use those paths verbatim.** Don't go looking for the asset root in the source or the environment
+   — `getContext` is where it lives.
+3. The posting's prior **fit** record — it **arrives on the job**, as `params.postings[].fit`
+   (`score`, `level` = the leveling call, `recommendation`, `gaps`). Use it to steer the edits: the
+   `gaps` say which bullets need work and which claims you must not make. **Don't go querying the
+   database for it** — if the key is absent the posting was never scored, and you steer off the JD
+   alone. That's the whole story; there is nothing further to look up.
 4. My **profile** from `getContext` — this carries my **`tailorGuidance`**, which is the tailoring
-   method itself (step 1). There is no per-job note field, so always read it.
+   method itself (step 1). There is no per-job note field, so always read it. The same call carries
+   `paths` (above), so one `getContext` covers both.
 
 ## Steps (per posting) — do BOTH of these. Neither is optional.
 
@@ -37,31 +45,39 @@ what to read, the helper that writes the files, what shape to hand back. See ste
    `find` is text copied **verbatim from the base résumé** (read it with `--text`), `replace` is your
    tailored line.
 
-   ```bash
-   # 1. Read the base résumé as plain text to copy exact `find` strings from:
-   npm run tailor:docx -- "$ASSET_ROOT/resume/resume-ref.docx" --text
+   Both steps are **`landed-local` MCP tools**, not shell commands. They already know where the
+   résumés live, so there are no paths to pass and nothing to build from a shell variable
+   (`$ASSET_ROOT` is **not** set in your shell).
 
-   # 2. Write your edits, then build resume.docx + resume.pdf into the app's slug folder:
-   #    edits.json = [{ "find": "<verbatim base line>", "replace": "<tailored line>" }, ...]
-   npm run tailor:docx -- "$ASSET_ROOT/resume/resume-ref.docx" \
-       "$ASSET_ROOT/resume/<slug>" edits.json
+   ```
+   1. readBaseResumeText()            → the base résumé as visible text.
+                                        Copy your `find` strings verbatim from THIS output.
+
+   2. buildTailoredResume({ slug, edits })
+        slug  — the one from `params`, unchanged (see below)
+        edits — [{ "find": "<verbatim base line>", "replace": "<tailored line>" }, ...]
+      → writes resume.docx (+ resume.pdf) into the app's slug folder.
    ```
 
-   Save to the **exact folder the app gives you** — `resume/<params.postings[].slug>/` — with the
-   **generic filenames** the helper writes (`resume.docx`, `resume.pdf`). The app dictates the slug
+   If `landed-local` is not among your tools, this checkout has not built it — say so in your
+   result rather than falling back to editing the .docx by hand.
+
+   The tool saves to the **exact folder the app dictates** — `resume/<params.postings[].slug>/` —
+   with the **generic filenames** it writes (`resume.docx`, `resume.pdf`). The app dictates the slug
    (a versioned path like `acme-senior-123/v2`); **don't invent your own** — pass the one in
    `params` and echo it back unchanged. Each redo is a new `v<N>` folder, so a prior version's files
    are never overwritten.
 
-   Rules the helper enforces for you, so respect them:
-   - **Every `find` must match, or nothing is written.** It prints `✓`/`✗ MISSED` per edit and exits
-     non-zero if any `find` is absent. A miss means your `find` isn't verbatim — re-copy it from the
-     `--text` dump (watch for the em-dash `→`, double spaces, and `&`), don't force it.
+   Rules the tool enforces for you, so respect them:
+   - **Every `find` must match, or nothing is written.** The result comes back with
+     `ok: false` and the unmatched strings in `missed`, and any previous résumé in that folder is
+     left untouched. A miss means your `find` isn't verbatim — re-copy it from
+     `readBaseResumeText` (watch for the em-dash `→`, double spaces, and `&`), don't force it.
    - **The PDF comes from LibreOffice** (`soffice`), which reads the template's real formatting, so
-     it matches the `.docx`. It builds in a temp dir and copies fresh files in (ASSET_ROOT is
-     cloud-synced — an in-place overwrite corrupts). **Never** reach for
-     `fpdf`/`reportlab`/`weasyprint`/`pandoc`; if `soffice` is genuinely missing, say so in your
-     result rather than improvising a renderer.
+     it matches the `.docx`. The tool runs it for you and writes fresh files (ASSET_ROOT is
+     cloud-synced — an in-place overwrite corrupts). If LibreOffice is missing you get
+     `ok: true` with `pdf: null` and a `note` — **report that note in your result**. **Never** reach
+     for `fpdf`/`reportlab`/`weasyprint`/`pandoc`.
    - **The base résumé renders to 3 pages — that is correct, not an overflow bug.** Don't "fix" it.
 
 ### Redos (when the task carries a prior conversation)

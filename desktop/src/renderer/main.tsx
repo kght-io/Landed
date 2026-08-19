@@ -20,6 +20,7 @@ import AgentChatsProvider from "./providers/AgentChatsProvider";
 import AgentQueueProvider from "@/components/AgentQueueProvider";
 import AgentsView from "@/components/AgentsView";
 import Files from "./Files";
+import Setup from "./Setup";
 import { AUTO_WORK_KEY } from "@/components/AutoWorkController";
 import { useEffect, useState } from "react";
 
@@ -85,7 +86,15 @@ function useAutoWorkBridge() {
 
 function App() {
   const [view, setView] = useState<"agents" | "files">("agents");
+  // Null until the first check answers, so the agents view never flashes before we know whether it
+  // can do anything. Once ready it stays ready — re-gating mid-session on a blip would be worse
+  // than letting a transcript report the failure.
+  const [ready, setReady] = useState<boolean | null>(null);
   useAutoWorkBridge();
+
+  useEffect(() => {
+    void window.landed.preflight().then((s) => setReady(s.ready));
+  }, []);
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-200">
       {/* The window is titleBarStyle: "hiddenInset", so macOS draws its traffic lights OVER the top
@@ -115,7 +124,15 @@ function App() {
       {/* AgentsView unchanged from the web app — its own header, its Chat / Monitor / MCP tabs, its
           own scrolling. Files is the one view with no counterpart there. */}
       <main className="min-h-0 flex-1 overflow-hidden">
-        {view === "agents" ? <AgentsView /> : <div className="h-full px-6 py-5"><Files /></div>}
+        {ready === null ? null : !ready ? (
+          <Setup onReady={() => setReady(true)} />
+        ) : view === "agents" ? (
+          <AgentsView />
+        ) : (
+          <div className="h-full px-6 py-5">
+            <Files />
+          </div>
+        )}
       </main>
     </div>
   );

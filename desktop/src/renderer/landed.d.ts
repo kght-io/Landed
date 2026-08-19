@@ -2,6 +2,7 @@
 // because this is the CONSUMER's view — the shape the reused web components and this app's own
 // views compile against.
 import type { Transcript } from "@landed/shared/agents/stream";
+import type { Summary } from "../preflight";
 
 declare global {
   interface Window {
@@ -22,6 +23,7 @@ declare global {
       agentStart(type: string): Promise<void>;
       agentStop(type: string): Promise<void>;
       agentClear(type: string): Promise<void>;
+      preflight(): Promise<Summary>;
       drainEnabled(): Promise<boolean>;
       setDrainEnabled(on: boolean): Promise<void>;
 

@@ -5,8 +5,9 @@ import { APP_ORIGIN, drainEnabled, ensureAssetRoot, getAssetRoot, setDrainEnable
 import { listDir, resolveWithin } from "./browse";
 import { parseDeepLink } from "./deeplink";
 import { revealAssetFolder, revealPrepFolder, revealResumeFolder } from "./local-ops";
-import { runDrain } from "./agent";
+import { CLAUDE_BIN, runDrain } from "./agent";
 import { createDrainLoop, type WaitResult } from "./supervisor";
+import { preflight, summarize } from "./preflight";
 import { emptyTranscript, reduceFrame, type Frame, type Transcript } from "@landed/shared/agents/stream";
 import { personaFor } from "@landed/shared/agents/personas";
 
@@ -266,6 +267,18 @@ app.whenReady().then(async () => {
   // it means "let this machine run them at all", which is the stronger promise — this process is the
   // one that works while nobody is watching. Off stops the loop AND kills anything mid-flight, since
   // a pause that lets the current job finish is not what someone reaching for it wants.
+  // Setup state, on demand. Checked when the window asks rather than cached at boot: someone fixing
+  // a missing CLI does it in another window and comes back, and a cached answer would still be wrong.
+  ipcMain.handle("preflight:check", async () => {
+    let assetRoot: string | null = null;
+    try {
+      assetRoot = getAssetRoot();
+    } catch {
+      /* not chosen yet */
+    }
+    return summarize(await preflight({ assetRoot, appOrigin: APP_ORIGIN, claudeBin: CLAUDE_BIN }));
+  });
+
   ipcMain.handle("supervisor:enabled", () => drainEnabled());
   ipcMain.handle("supervisor:setEnabled", (_e, on: boolean) => {
     setDrainEnabled(on);

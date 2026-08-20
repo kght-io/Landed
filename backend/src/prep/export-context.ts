@@ -13,11 +13,12 @@ import path from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { postings, companies, interviews } from "../db/schema";
-import { getCompanyProfile, companySlug, type CompanyProfile } from "../db/prep";
+import { companySlug } from "../db/prep";
 import { listPrepEmails, listTranscriptRows } from "../db/prep-assets";
 import { exportTranscriptsFor } from "./transcripts";
 import { PREP_ROOT, writeFresh } from "./root";
-import type { InterviewRound, FitAssessment, Comment, EmailRefs, PrepEmail } from "@landed/shared/types";
+import type { InterviewRound, FitAssessment, Comment, EmailRefs, PrepEmail, SourcedText } from "@landed/shared/types";
+import { parseBriefs, latestBrief } from "@landed/shared/jobs/briefs";
 
 // Re-exported: this module was the home of PREP_ROOT before the dumps split out, and it's what the
 // routes, the chat, and the other prep helpers import.
@@ -94,6 +95,7 @@ type Co = {
   company: string; role: string; status: string; url?: string | null;
   comp?: string | null; teamNotes?: string | null; note?: string | null; jd?: string | null;
   comments: Comment[]; fit?: FitAssessment; fitScore?: number | null; rounds: InterviewRound[];
+  briefs?: string | null; // raw postings.interview_briefs JSON — parsed by briefResearchBlock
   emailRefs?: EmailRefs;
 };
 
@@ -130,14 +132,42 @@ function fitBlock(c: Co): string {
 }
 
 
-function profileBlock(profile: CompanyProfile | null): string {
-  if (!profile) return "_No researched prep profile for this company._";
-  const out: string[] = [];
-  if (profile.overview) out.push(`### Company & product\n${profile.overview}`);
-  if (profile.process) out.push(`### Interview process\n${profile.process}`);
-  if (profile.rounds.length) out.push(`### Researched rounds\n` + profile.rounds.map((r) => `- **${r.name}**${r.format ? ` (${r.format})` : ""}${r.focus ? ` — ${r.focus}` : ""}`).join("\n"));
-  if (profile.sources.length) out.push(`### Sources\n` + profile.sources.map((s) => `- ${s.url ? `[${s.label}](${s.url})` : s.label}`).join("\n"));
-  return out.join("\n\n");
+
+// What an interview brief found ONLINE, and only that.
+//
+// The brief is mostly a synthesis of files the coach reads anyway — its `recruiter` and `jd` facts
+// are a lossier retelling of emails.md, transcripts/ and the JD block above, and copying them here
+// would rebuild the digest-instead-of-evidence problem this file's readers were just steered away
+// from. Its `online` findings are the exception: predicted question shapes, the loop's reported
+// format, domain vocabulary, the company's public engineering positions — none of it is anywhere in
+// the folder, and re-deriving it means the coach re-searching the web every conversation.
+//
+// A gap the brief itself credits to the fit assessment ("fit: …") is skipped: that IS this file, a
+// few sections up, and reading it back as research would double-count it.
+function briefResearchBlock(rows: Co[]): string {
+  const brief = rows.map((r) => latestBrief(parseBriefs(r.briefs))).find(Boolean);
+  if (!brief) return "";
+  const online = (t?: SourcedText) => (t?.source === "online" && t.text ? t.text : null);
+  const facts: string[] = [];
+  for (const [label, t] of [["Role", brief.role], ["Team", brief.team], ["What they're looking for", brief.expectations]] as const) {
+    const text = online(t);
+    if (text) facts.push(`- **${label}:** ${text}`);
+  }
+  const gaps = (brief.gaps ?? []).filter(
+    (g) => g.source === "online" && !/^\s*fit\s*:/i.test(g.why ?? ""),
+  );
+  if (!facts.length && !gaps.length) return "";
+  const out = [
+    `## Researched online (interview brief v${brief.version} · ${(brief.generatedAt ?? "").slice(0, 10)})`,
+    `Found by the interview-brief job searching the web — NOT in this folder's emails or transcripts,`,
+    `so treat it as reported rather than confirmed, and check it against what the recruiter actually said.`,
+  ];
+  if (facts.length) out.push("", ...facts);
+  if (gaps.length) {
+    out.push("", `**Gaps to prep**`);
+    for (const g of gaps) out.push(`- **${g.area}**${g.severity ? ` (${g.severity})` : ""}${g.why ? ` — ${g.why}` : ""}`);
+  }
+  return out.join("\n");
 }
 
 function commentsBlock(c: Co): string {
@@ -215,7 +245,7 @@ function capturedEmailsBlock(slug: string): string {
   return out.join("\n");
 }
 
-function buildContext(company: string, slug: string, rows: Co[], profile: CompanyProfile | null): string {
+function buildContext(company: string, slug: string, rows: Co[]): string {
   const today = new Date().toISOString().slice(0, 10);
   const lead = rows[0];
   const out: string[] = [
@@ -235,9 +265,10 @@ function buildContext(company: string, slug: string, rows: Co[], profile: Compan
   out.push(`\n## Interview loop\n${roundsBlock(lead.rounds)}`);
   const fit = rows.map(fitBlock).filter(Boolean).join("\n\n");
   if (fit) out.push(`\n${fit}`);
-  out.push(`\n## Researched prep profile\n${profileBlock(profile)}`);
   const jd = rows.map((r) => r.jd).find(Boolean);
   if (jd) out.push(`\n## Job description\n\n\`\`\`\n${jd}\n\`\`\``);
+  const research = briefResearchBlock(rows);
+  if (research) out.push(`\n${research}`);
   const captured = capturedEmailsBlock(slug);
   if (captured) out.push(`\n${captured}`);
   const emails = emailManifestBlock(rows);
@@ -283,6 +314,7 @@ function gatherCompany(slug: string): { company: string; rows: Co[] } | null {
       comp: p.comp, teamNotes: p.teamNotes, note: p.note, jd: p.jd,
       comments: parse<Comment[]>(p.comments, []), fit: parse<FitAssessment | undefined>(p.fitDetail, undefined),
       fitScore: p.fitScore, rounds: roundsFor(p.id), emailRefs: parse<EmailRefs>(p.emailRefs, {}),
+      briefs: p.interviewBriefs,
     };
   });
   return { company: rows[0].company, rows };
@@ -328,12 +360,11 @@ export function exportEmailsFor(slug: string): { at: string } | null {
 export function exportPrepContextFor(slug: string): { at: string } | null {
   const g = gatherCompany(slug);
   if (!g) return null;
-  const profile = getCompanyProfile(slug);
   // Best-effort: a cloud-sync write hiccup on one dump must not cost us the context file.
   try { exportTranscriptsFor(slug); } catch { /* dump is best-effort */ }
   try { exportEmailsFor(slug); } catch { /* dump is best-effort */ }
   fs.mkdirSync(path.dirname(contextPath(slug)), { recursive: true });
-  fs.writeFileSync(contextPath(slug), buildContext(g.company, slug, g.rows, profile));
+  fs.writeFileSync(contextPath(slug), buildContext(g.company, slug, g.rows));
   return { at: new Date().toISOString() };
 }
 
@@ -354,8 +385,7 @@ export function exportAllPrepContext(): { slug: string; company: string }[] {
   const index: string[] = [];
   for (const [slug, company] of seen) {
     exportPrepContextFor(slug);
-    const profile = getCompanyProfile(slug);
-    index.push(`- **${company}** → [\`${slug}/context.md\`](${slug}/context.md)${profile ? "" : " · _no prep profile yet_"}`);
+    index.push(`- **${company}** → [\`${slug}/context.md\`](${slug}/context.md)`);
     done.push({ slug, company });
   }
   const readme = [

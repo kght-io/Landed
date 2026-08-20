@@ -252,8 +252,8 @@ export const prepQuestions = sqliteTable("prep_questions", {
 });
 
 // One row per company you're prepping for — the research output the retired prep-research job
-// wrote. Read-only now (getCompanyProfile folds it into the company's context.md dump); the
-// company-specific narrative + the ordered category list its view was built from. Keyed by
+// wrote. Nothing reads it any more; kept so the rows survive. The company-specific narrative + the
+// ordered category list its view was built from. Keyed by
 // the same slug used in prepQuestions.companies / companyMeta (canonical company key).
 export const prepCompany = sqliteTable("prep_company", {
   slug: text("slug").primaryKey(),

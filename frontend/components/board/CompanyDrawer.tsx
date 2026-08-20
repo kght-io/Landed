@@ -1,22 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, CheckCircle2, Circle, MapPin, CalendarClock, RefreshCw, Pencil, FileText, Sparkles, Plus, Target, Loader2, MessageSquareText, Mail, FolderOpen, Users, Eye, HelpCircle } from "lucide-react";
-import type { BriefGap, InterviewBrief, InterviewRound, Posting, RedoTurn, SourcedText, Status, Tier } from "@landed/shared/types";
+import { useState } from "react";
+import { Building2, X, ExternalLink, Link2, Trash2, Radar, GitCompareArrows, MapPin, CalendarClock, RefreshCw, Pencil, FileText } from "lucide-react";
+import type { InterviewRound, Posting, RedoTurn, Status, Tier } from "@landed/shared/types";
 import { reapplyInfo, STATUS_LABEL, STATUS_CHIP, TIER_META, TIERS } from "@landed/shared/pipeline/stages";
 import { isCooling } from "@landed/shared/pipeline/cooldown";
-import { ROUND_KIND_LABEL } from "@landed/shared/prep/landing";
+import { ROUND_KIND_LABEL } from "@landed/shared/pipeline/interview-loop";
 import { type CompanyAgg } from "@landed/shared/pipeline/board";
 import InterviewStages from "./InterviewStages";
 import CoolingBadge from "./CoolingBadge";
-import { AttachmentChip, revealPrepFolder } from "./PrepFiles";
+import PrepChatCard from "./PrepChatCard";
+import PrepMaterials from "./PrepMaterials";
+import InterviewBriefCard from "./InterviewBriefCard";
+import { SectionLabel, EDIT_BASE } from "./ui";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
-import { baseResumeUrl, getPrepAssets, type PrepAssets } from "@/lib/local-capability";
+import { baseResumeUrl } from "@/lib/local-capability";
 import { tailorDiffFor } from "@landed/shared/jobs/redolog";
 import { FitBadge, GapList } from "./Badges";
 import ResumeDiffModal from "@/components/ResumeDiff";
 import FitDetailModal from "@/components/FitDetail";
 import { DesireSelect } from "@/components/DesireTag";
+import { usePersistentState } from "@/hooks/usePersistentState";
 
 // Header chip on a tailored/assessed section with a redo in flight (the stage doesn't regress).
 function RedoChip() {
@@ -56,8 +60,6 @@ function DecisionButtons({ p, onSetStatus }: { p: Posting; onSetStatus: (p: Post
 }
 
 // Inline-editable text. Uncontrolled; commits on blur or Enter, reverts on Escape.
-const EDIT_BASE =
-  "-mx-1 rounded bg-transparent px-1 outline-none transition placeholder:text-zinc-600 hover:bg-zinc-800/50 focus:bg-zinc-900 focus:ring-1 focus:ring-zinc-600";
 function EditField({
   value, onCommit, placeholder, className,
 }: {
@@ -83,355 +85,67 @@ function EditField({
 }
 
 
-// A small section label.
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{children}</p>;
-}
-
 // Placeholder when a reached stage has no artifact (e.g. applied without a fit assessment).
 function EmptyStage({ children }: { children: React.ReactNode }) {
   return <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-5 text-center text-[13px] text-zinc-600">{children}</p>;
 }
 
-// One prep-material input row: a dumped-vs-missing dot + label + status line + an action, with an
-// optional full-width `below` slot (the emails row lists the files it downloaded there).
-function MaterialRow({ icon, label, done, status, children, below }: { icon: React.ReactNode; label: string; done: boolean; status: string; children?: React.ReactNode; below?: React.ReactNode }) {
+
+// The interview stage's three panes — where the loop stands (rounds + the brief), the prep coach,
+// and the materials that feed both. Tabs rather than a stack: each pane is tall (the chat
+// especially), and stacking them buried the one you came for. The choice persists, so the drawer
+// reopens where you left it.
+const INTERVIEW_TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "chat", label: "Prep chat" },
+  { key: "materials", label: "Materials" },
+] as const;
+
+// The tab bar itself lives in the drawer HEADER, not in the scrolling body: it has to stay put while
+// a long pane scrolls under it, and `sticky` inside the body's p-5 leaves a strip of that padding
+// above the bar for content to scroll through. Sitting in the fixed header, it simply never moves.
+// `-mb-5` drops it onto the header's own bottom border, which doubles as the tab underline.
+function InterviewTabBar({ active, onChange }: { active: string; onChange: (key: string) => void }) {
   return (
-    <div className="py-2">
-      <div className="flex items-center gap-2.5">
-        <span className={`shrink-0 ${done ? "text-emerald-400" : "text-zinc-600"}`}>{done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
-        <span className="shrink-0 text-zinc-500">{icon}</span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-zinc-200">{label}</p>
-          <p className="text-[12px] text-zinc-500">{status}</p>
-        </div>
-        {children}
-      </div>
-      {below}
-    </div>
-  );
-}
-
-// A queue-a-job action button with idle/queuing/queued states (mirrors GeneratePrep's old machine).
-function RowButton({ state, label, onClick }: { state: "idle" | "queuing" | "queued"; label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={state !== "idle"}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-zinc-800 px-2 py-1 text-[12px] font-medium text-zinc-200 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-700 disabled:opacity-50"
-    >
-      {state === "queuing" && <Loader2 size={11} className="animate-spin" />}
-      {state === "queuing" ? "Queuing\u2026" : state === "queued" ? "Queued" : label}
-    </button>
-  );
-}
-
-
-// The three asset INPUTS that feed the interview brief — pull interview emails, research questions,
-// add transcript — each with a dumped-vs-missing status, plus a link into the asset folder. Reads
-// one status endpoint; each action (re)queues its job or writes a transcript, then refreshes.
-function PrepMaterials({ p, onChanged }: { p: Posting; onChanged?: () => void }) {
-  const { bump } = useAgentQueue();
-  const [assets, setAssets] = useState<PrepAssets | null>(null);
-  const [emailState, setEmailState] = useState<"idle" | "queuing" | "queued">("idle");
-  const [prepState, setPrepState] = useState<"idle" | "queuing" | "queued">("idle");
-  const [prepSlug, setPrepSlug] = useState<string | null>(null);
-  const [showPaste, setShowPaste] = useState(false);
-
-  const refresh = useCallback(() => {
-    getPrepAssets(p.id)
-      .then((d) => { if (!("error" in d)) setAssets(d); })
-      .catch(() => {});
-  }, [p.id]);
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const pullEmails = async () => {
-    setEmailState("queuing");
-    try { await fetch(`/api/applications/${p.id}/interview-emails`, { method: "POST" }); setEmailState("queued"); bump(); }
-    catch { setEmailState("idle"); }
-  };
-  const research = async () => {
-    setPrepState("queuing");
-    try {
-      const res = await fetch(`/api/applications/${p.id}/prep`, { method: "POST" });
-      const d = (await res.json().catch(() => ({}))) as { slug?: string | null };
-      setPrepSlug(d.slug ?? null); setPrepState("queued"); bump();
-      pendo.track("interview_prep_generated", { posting_id: p.id });
-    } catch { setPrepState("idle"); }
-  };
-  const emails = assets?.emails;
-  const files = emails?.attachments ?? [];
-  const researchedAt = assets?.questions?.researchedAt ?? null;
-  const transcripts = assets?.transcripts ?? [];
-  const slug = assets?.slug ?? prepSlug;
-
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="mb-1 flex items-center justify-between">
-        <SectionLabel>Interview prep materials</SectionLabel>
-        <button onClick={() => revealPrepFolder(p.id)} title="Reveal the interview-prep folder" className="inline-flex items-center gap-1 text-[12px] text-zinc-400 transition hover:text-zinc-200">
-          <FolderOpen size={12} /> open folder
-        </button>
-      </div>
-      <div className="divide-y divide-zinc-800/70">
-        <MaterialRow
-          icon={<Mail size={15} />}
-          label="Interview emails"
-          done={!!emails?.at}
-          status={emails?.at ? `pulled ${emails.at.slice(0, 10)}${files.length ? ` · ${files.length} file${files.length === 1 ? "" : "s"}` : ""}` : "not pulled yet"}
-          below={files.length ? (
-            // Every file the recruiter sent, openable. A stage links the ones its rounds claimed;
-            // this is the whole folder, so a file no round named is still one click away.
-            <div className="mt-1.5 flex flex-wrap gap-1.5 pl-[46px]">
-              {files.map((f) => <AttachmentChip key={f.name} postingId={p.id} name={f.name} bytes={f.bytes} />)}
-            </div>
-          ) : null}
-        >
-          <RowButton state={emailState} label={emails?.at ? "Re-pull" : "Pull"} onClick={pullEmails} />
-        </MaterialRow>
-
-        <MaterialRow
-          icon={<HelpCircle size={15} />}
-          label="Question research"
-          done={!!researchedAt}
-          status={researchedAt ? `researched ${researchedAt.slice(0, 10)}` : "not researched yet"}
-        >
-          <div className="flex items-center gap-2">
-            {slug && researchedAt && <a href={`/prep/company/${slug}`} className="text-[12px] font-medium text-sky-300 hover:text-sky-200">view →</a>}
-            <RowButton state={prepState} label={researchedAt ? "Re-research" : "Research questions"} onClick={research} />
-          </div>
-        </MaterialRow>
-
-        <MaterialRow
-          icon={<MessageSquareText size={15} />}
-          label="Call transcripts"
-          done={transcripts.length > 0}
-          status={transcripts.length ? `${transcripts.length} added` : "none added yet"}
-        >
-          <button onClick={() => setShowPaste((v) => !v)} className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-zinc-300 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-800">
-            <Plus size={12} /> add
+    <div className="-mx-5 -mb-5 mt-4 flex gap-1 px-5">
+      {INTERVIEW_TABS.map((t) => {
+        const on = t.key === active;
+        return (
+          <button
+            key={t.key}
+            onClick={() => onChange(t.key)}
+            className={`-mb-px whitespace-nowrap rounded-t-md border-b-2 px-4 py-2.5 text-[14px] font-semibold tracking-tight transition ${
+              on
+                ? "border-violet-400 bg-violet-500/10 text-violet-100"
+                : "border-transparent text-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-200"
+            }`}
+          >
+            {t.label}
           </button>
-        </MaterialRow>
-      </div>
-      {showPaste && <div className="mt-2 border-t border-zinc-800 pt-2"><TranscriptDrop postingId={p.id} onSaved={() => { refresh(); onChanged?.(); }} /></div>}
+        );
+      })}
     </div>
   );
 }
 
-// Provenance tag on a brief fact/gap — recruiter (said directly) vs JD (fallback) vs online research.
-const SOURCE_META: Record<string, { label: string; cls: string }> = {
-  recruiter: { label: "recruiter", cls: "bg-emerald-500/15 text-emerald-300" },
-  jd: { label: "JD", cls: "bg-zinc-700/70 text-zinc-300" },
-  online: { label: "online", cls: "bg-sky-500/15 text-sky-300" },
-};
-function SourceChip({ source }: { source?: string }) {
-  const m = source ? SOURCE_META[source] : undefined;
-  if (!m) return null;
-  return <span className={`ml-1.5 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-medium ${m.cls}`}>{m.label}</span>;
-}
-
-const GAP_TONE: Record<string, string> = { high: "bg-rose-400", medium: "bg-amber-400", low: "bg-sky-400" };
-function GapRow({ g }: { g: BriefGap }) {
+// The selected pane's content, in the scrolling body.
+function InterviewPane({
+  active, p, rounds, reapply, onChanged, onSetInterviewed,
+}: {
+  active: string;
+  p: Posting;
+  rounds: InterviewRound[];
+  reapply: ReturnType<typeof reapplyInfo>;
+  onChanged?: () => void;
+  onSetInterviewed: (p: Posting, v: boolean) => void;
+}) {
+  if (active === "chat") return <PrepChatCard p={p} />;
+  if (active === "materials") return <PrepMaterials p={p} onChanged={onChanged} />;
   return (
-    <li className="flex gap-2 text-[13px] leading-relaxed">
-      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${GAP_TONE[g.severity ?? ""] ?? "bg-zinc-500"}`} />
-      <span className="text-zinc-300">
-        <span className="font-medium text-zinc-100">{g.area}</span>
-        {g.why ? <span className="text-zinc-500"> — {g.why}</span> : null}
-        <SourceChip source={g.source} />
-      </span>
-    </li>
-  );
-}
-
-// One overview row (icon · label · sourced value) in the brief. Omitted when the value is empty.
-function BriefFact({ icon, label, fact }: { icon: React.ReactNode; label: string; fact?: SourcedText }) {
-  if (!fact?.text?.trim()) return null;
-  return (
-    <div className="flex items-start gap-2">
-      <span className="mt-0.5 shrink-0 text-zinc-500">{icon}</span>
-      <div className="min-w-0">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{label}</span>
-        <p className="text-[13px] leading-relaxed text-zinc-200">{fact.text}<SourceChip source={fact.source} /></p>
-      </div>
-    </div>
-  );
-}
-
-// Paste-a-transcript box + the list of transcripts already dropped for this company. The app can't
-// record calls, so you paste one here and it's written to interview-prep/<slug>/transcripts/ — the
-// interview-brief job reads that folder to ground the gaps. Fetches the current list on mount.
-function TranscriptDrop({ postingId, onSaved }: { postingId: string; onSaved?: () => void }) {
-  const [items, setItems] = useState<{ name: string; bytes: number; at: string }[]>([]);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    fetch(`/api/applications/${postingId}/transcript`)
-      .then((r) => r.json())
-      .then((d) => { if (live) setItems(d.transcripts ?? []); })
-      .catch(() => {});
-    return () => { live = false; };
-  }, [postingId]);
-
-  const save = async () => {
-    if (!body.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/applications/${postingId}/transcript`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body, title: title.trim() || undefined }),
-      });
-      const d = (await res.json().catch(() => ({}))) as { transcripts?: typeof items };
-      if (d.transcripts) setItems(d.transcripts);
-      setTitle(""); setBody("");
-      onSaved?.();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div>
-      <SectionLabel>Call transcripts</SectionLabel>
-      {items.length > 0 && (
-        <ul className="mb-2 space-y-1">
-          {items.map((t) => (
-            <li key={t.name} className="flex items-center gap-2 text-[12px] text-zinc-400">
-              <MessageSquareText size={12} className="shrink-0 text-zinc-600" />
-              <span className="text-zinc-300">{t.name}</span>
-              <span className="text-zinc-600">· {Math.max(1, Math.round(t.bytes / 1024))} KB · {t.at.slice(0, 10)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onClick={(e) => e.stopPropagation()}
-        placeholder="round label (optional) — e.g. System design w/ platform lead"
-        className={`${EDIT_BASE} mb-1.5 block w-full rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5 text-[12px] text-zinc-300 focus:border-zinc-600`}
-      />
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        onClick={(e) => e.stopPropagation()}
-        rows={3}
-        placeholder="Paste the interview call transcript…"
-        className={`${EDIT_BASE} block w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[13px] leading-relaxed text-zinc-300 focus:border-zinc-600`}
-      />
-      <div className="mt-1.5 flex justify-end">
-        <button
-          onClick={save}
-          disabled={saving || !body.trim()}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-zinc-300 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-800 disabled:opacity-40"
-        >
-          <Plus size={12} /> {saving ? "Saving…" : "Add transcript"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// The interview brief — a versioned overview the agent generates from this company's interview-prep
-// asset folder (context.md + dropped transcripts + fetched emails). Shows the latest version's
-// role · team · what they're looking for · gaps-to-prep, a version switcher, and a Generate button
-// that (re)queues the interview-brief job. Live off the shared queue for the queued/working state.
-// The agent still reports `tc` and `nextStep`; neither is shown here — comp belongs to the posting
-// and peer-comp, and the stage rail above answers "what's next" from the loop itself.
-function InterviewBriefCard({ p, onChanged }: { p: Posting; onChanged?: () => void }) {
-  const { jobs, bump } = useAgentQueue();
-  const briefs = p.interviewBriefs ?? [];
-  const [selVersion, setSelVersion] = useState<number | null>(null);
-  const [queuing, setQueuing] = useState(false);
-
-  const job = jobs.find((j) => j.id === `interview-brief-${p.id}`);
-  const working = job?.status === "wip";
-  const queued = job?.status === "queued" || (!!job && !working) || queuing;
-
-  const latest = briefs.length ? briefs[briefs.length - 1] : null;
-  const current: InterviewBrief | null =
-    (selVersion != null ? briefs.find((b) => b.version === selVersion) : null) ?? latest;
-
-  const generate = async () => {
-    setQueuing(true);
-    try {
-      await fetch(`/api/applications/${p.id}/interview-brief`, { method: "POST" });
-      bump();
-      onChanged?.();
-    } finally {
-      setQueuing(false);
-    }
-  };
-
-  const btnLabel = working ? "Generating…" : queued ? "Queued…" : briefs.length ? "Re-generate" : "Generate brief";
-
-  return (
-    <div className="rounded-lg border border-violet-500/20 bg-violet-500/[0.05] p-3">
-      <div className="flex items-center gap-2.5">
-        <Sparkles size={16} className="shrink-0 text-violet-300" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-zinc-200">Interview brief</p>
-          <p className="text-[12px] text-zinc-500">Role · team · what they want · gaps, from your dumped materials.</p>
-        </div>
-        <button
-          onClick={generate}
-          disabled={working || queued}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-violet-500/90 px-2.5 py-1 text-[13px] font-medium text-violet-950 transition hover:bg-violet-400 disabled:opacity-50"
-        >
-          {(working || queued) && <Loader2 size={12} className="animate-spin" />}
-          {btnLabel}
-        </button>
-      </div>
-
-      {briefs.length > 1 && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-1">
-          {briefs.map((b) => {
-            const on = current?.version === b.version;
-            return (
-              <button
-                key={b.version}
-                onClick={() => setSelVersion(b.version)}
-                className={`rounded px-1.5 py-0.5 text-[11px] font-semibold transition ${on ? "bg-violet-500/25 text-violet-100" : "text-zinc-400 hover:bg-zinc-800"}`}
-              >
-                v{b.version}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {current ? (
-        <div className="mt-3 space-y-3 border-t border-violet-500/15 pt-3">
-          <div className="space-y-2.5">
-            {/* Comp lives on the posting and in peer-comp; the next step is the stage rail above. */}
-            <BriefFact icon={<Building2 size={13} />} label="Role" fact={current.role} />
-            <BriefFact icon={<Users size={13} />} label="Team" fact={current.team} />
-            <BriefFact icon={<Eye size={13} />} label="What they're looking for" fact={current.expectations} />
-          </div>
-          {current.summary && <p className="text-[13px] leading-relaxed text-zinc-300">{current.summary}</p>}
-          {!!current.gaps?.length && (
-            <div>
-              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                <Target size={12} /> Gaps to prep
-              </div>
-              <ul className="space-y-1">{current.gaps.map((g, i) => <GapRow key={i} g={g} />)}</ul>
-            </div>
-          )}
-          <p className="text-[11px] text-zinc-600">
-            v{current.version} · generated {current.generatedAt.slice(0, 10)}
-            {current.materials?.length ? ` · ${current.materials.join(", ")}` : ""}
-          </p>
-        </div>
-      ) : (
-        <p className="mt-3 border-t border-violet-500/15 pt-3 text-[12px] text-zinc-500">
-          {working || queued
-            ? "Queued in the agent — reading your dumped materials to build the brief."
-            : "No brief yet. Feed the inputs below (emails · questions · transcripts), then generate one."}
-        </p>
-      )}
+    <div className="space-y-4">
+      <StageHighlight p={p} col="interviewing" rounds={rounds} reapply={reapply} />
+      <InterviewBriefCard p={p} onChanged={onChanged} />
+      <InterviewedToggle p={p} onSetInterviewed={onSetInterviewed} />
     </div>
   );
 }
@@ -740,17 +454,25 @@ export default function CompanyDrawer({
   const [selectedStage, setSelectedStage] = useState(currentStage);
   const [diffSlug, setDiffSlug] = useState<string | null>(null);
   const [fitOpen, setFitOpen] = useState(false);
+  // Which interview pane is showing. Persisted, and read by BOTH halves — the bar lives in the
+  // header, the pane in the scrolling body. A stored value that no longer names a tab falls back.
+  const [storedTab, setInterviewTab] = usePersistentState("landed.drawer.interview.tab", "overview");
+  const interviewTab = INTERVIEW_TABS.some((t) => t.key === storedTab) ? storedTab : "overview";
   const { redoNoteFor } = useAgentQueue();
   if (!p) return null;
   const reapply = reapplyInfo(p);
   const rounds = p.interviews ?? [];
   const selKey = DRAWER_STAGES[selectedStage].key;
+  // The chat pane sizes itself to the drawer instead of scrolling with it: the body stops being a
+  // scroller and becomes a flex column the pane fills, so the only thing that scrolls is the message
+  // log inside the chat (its header + composer stay put, the way a chat window should behave).
+  const fillsBody = selKey === "interview" && interviewTab === "chat";
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <aside
-        className="relative flex h-full w-[480px] flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl"
+        className="relative flex h-full w-[720px] max-w-full flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header — company headline (prominent), role, location · tier · url, then the stepper */}
@@ -797,10 +519,11 @@ export default function CompanyDrawer({
           <div className="mt-4">
             <StageRail current={currentStage} selected={selectedStage} onSelect={setSelectedStage} />
           </div>
+          {selKey === "interview" && <InterviewTabBar active={interviewTab} onChange={setInterviewTab} />}
         </div>
 
         {/* Body — the selected stage's details (defaults to the current stage). */}
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <div className={`flex-1 p-5 ${fillsBody ? "flex min-h-0 flex-col overflow-hidden" : "space-y-4 overflow-y-auto"}`}>
           {selKey === "scan" && (
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2.5">
               <div className="flex items-center gap-1.5 text-[13px]"><Radar size={14} className="shrink-0 text-emerald-300" /><span className="font-medium text-zinc-200">Surfaced in discovery</span></div>
@@ -846,12 +569,14 @@ export default function CompanyDrawer({
           {selKey === "applied" && <StageHighlight p={p} col="applied" rounds={rounds} reapply={reapply} isCurrent={selectedStage === currentStage} />}
 
           {selKey === "interview" && (
-            <>
-              <StageHighlight p={p} col="interviewing" rounds={rounds} reapply={reapply} />
-              <InterviewBriefCard p={p} onChanged={onChanged} />
-              <PrepMaterials p={p} onChanged={onChanged} />
-              <InterviewedToggle p={p} onSetInterviewed={onSetInterviewed} />
-            </>
+            <InterviewPane
+              active={interviewTab}
+              p={p}
+              rounds={rounds}
+              reapply={reapply}
+              onChanged={onChanged}
+              onSetInterviewed={onSetInterviewed}
+            />
           )}
 
           {selKey === "closed" && (
@@ -876,13 +601,6 @@ export default function CompanyDrawer({
               {p.comp && <div><SectionLabel>Comp structure</SectionLabel><p className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-400">{p.comp}</p></div>}
               {p.teamNotes && <div><SectionLabel>Team · product · work</SectionLabel><p className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-400">{p.teamNotes}</p></div>}
             </>
-          )}
-
-          {p.note && (
-            <div>
-              <SectionLabel>Notes</SectionLabel>
-              <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-400">{p.note}</p>
-            </div>
           )}
         </div>
 

@@ -1,9 +1,9 @@
 import { eq, desc, and, inArray, like, or } from "drizzle-orm";
 import { db } from "./index";
+import { emitStageChange } from "./stage-change";
 import { companies, events, interviews, pendingMatches, postings } from "./schema";
 import type { PostingRow, CompanyRow, EventRow } from "./schema";
 import { canonical, defaultTier, norm } from "@landed/shared/agents/canonical";
-import { emitStageChange } from "./stage-change";
 import { logEvent, by } from "./events";
 import { applyRejectionCooldown, coolingCompanyIds, isCompanyCooling, setCompanyCooldown } from "./cooldown";
 import { isHiddenWhileCooling } from "@landed/shared/pipeline/cooldown";
@@ -167,8 +167,8 @@ export function upsertInterviews(appId: number, rounds: InterviewRound[], opts: 
 
 // Add one hand-authored interview round to a posting. Appended after the highest existing round
 // number so it sorts last; inbox-sync (upsertInterviews) keeps matching on `round`, so synced and
-// hand-authored rounds coexist. `notes` doubles as the format/focus the recruiter described (fed to
-// prep-research). Returns the updated Posting, or null if the posting is gone.
+// hand-authored rounds coexist. `notes` doubles as the format/focus the recruiter described (it
+// lands in the company's context.md). Returns the updated Posting, or null if the posting is gone.
 export function addInterviewRound(
   appId: number,
   round: Pick<InterviewRound, "kind" | "date" | "outcome" | "notes">,
@@ -347,9 +347,9 @@ export function updateApplication(id: number, patch: ApplicationPatch, actor?: s
   db.update(postings).set(set as Partial<typeof postings.$inferInsert>).where(eq(postings.id, id)).run();
   const after = getPosting(id);
 
-  // Announce the stage move; the jobs layer decides what it's worth (entering `interview` earns a
-  // one-shot prep-research job). This file deliberately doesn't know that — see ./stage-change.ts.
-  if (patch.status) emitStageChange({ companyId: rawBefore.companyId, from: rawBefore.state, to: patch.status });
+  // Announce the stage move; the jobs layer decides what it's worth (entering `interview` earns an
+  // interview brief). This file deliberately doesn't know that — see ./stage-change.ts.
+  if (patch.status) emitStageChange({ postingId: id, companyId: rawBefore.companyId, from: rawBefore.state, to: patch.status });
 
   // A rejection may have just earned this company a cooldown (or extended one). Recomputed from the
   // company's postings rather than from this patch, so it sees the interview rounds that decide

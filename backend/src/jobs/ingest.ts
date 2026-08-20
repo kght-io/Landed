@@ -7,9 +7,9 @@ import { isCompanyCooling } from "../db/cooldown";
 import { reconcile } from "../agents/reconcile";
 import { incomingFromInboxRecords, incomingRounds } from "@landed/shared/agents/sources/inbox";
 import { canonical, norm } from "@landed/shared/agents/canonical";
-import { ingestPrepRecords, ingestPrepResearch, ingestLeetcodeAdd, companySlug } from "../db/prep";
+import { companySlug } from "../db/prep";
 import { upsertPrepEmails } from "../db/prep-assets";
-import { exportPrepContextFor, exportQuestionsFor, exportEmailsFor } from "../prep/export-context";
+import { exportEmailsFor } from "../prep/export-context";
 import { incomingEmails } from "@landed/shared/agents/emails";
 import { str, num, describeWarnings } from "@landed/shared/util/coerce";
 import { parseRedoLog, nextVersion } from "@landed/shared/jobs/redolog";
@@ -250,73 +250,6 @@ export function ingestPeerComp(records: ResultRecord[], dryRun?: boolean): Recon
   }
   if (!dryRun) setPeerComp(markdown, new Date().toISOString());
   return { inserted: 0, updated: 1, fieldChanges: 1, flagged: 0, pending: 0, newCompanies: 0, summary: "peer-comp comparison updated", details: [{ action: "update", summary: "peer-comp comparison updated" }] };
-}
-
-// prep record: { leetcodeNum?|name, status, durationSec?, notes?, noted?, redo?, ... }.
-// The agent logged a coding practice attempt; ingestPrepRecords resolves it to a catalog
-// question (or inserts a new one) and appends the attempt. Doesn't touch applications.
-export function ingestPrep(records: ResultRecord[], dryRun?: boolean): ReconcileResult {
-  const r = ingestPrepRecords(records, dryRun);
-  const parts: string[] = [];
-  if (r.attempts) parts.push(`${r.attempts} attempt${r.attempts === 1 ? "" : "s"}`);
-  if (r.inserted) parts.push(`${r.inserted} new question${r.inserted === 1 ? "" : "s"}`);
-  if (r.flagged) parts.push(`${r.flagged} flagged`);
-  return {
-    inserted: r.inserted,
-    updated: r.attempts,
-    fieldChanges: r.attempts + r.flagged,
-    flagged: r.flagged,
-    pending: 0,
-    newCompanies: 0,
-    summary: parts.join(", ") || "no prep changes",
-    details: r.details,
-  };
-}
-
-// leetcode-add record: { id, name?, difficulty?, topic?|pattern?, leetcodeNum? }. The agent resolved a
-// manually-added stub's real name/difficulty/topic from its URL; ingestLeetcodeAdd fills the row by id.
-export function ingestLeetcodeAddJob(records: ResultRecord[], dryRun?: boolean): ReconcileResult {
-  const r = ingestLeetcodeAdd(records, dryRun);
-  return {
-    inserted: 0,
-    updated: r.enriched,
-    fieldChanges: r.enriched,
-    flagged: 0,
-    pending: 0,
-    newCompanies: 0,
-    summary: r.enriched ? `${r.enriched} leetcode question${r.enriched === 1 ? "" : "s"} enriched` : "no leetcode changes",
-    details: r.details,
-  };
-}
-
-// prep-research record batch: one { type:"profile", company, process, rounds[], categories[],
-// sources[] } + N { type:"question", company, category, track?, name, leetcodeNum?|prompt, ... }.
-// The agent researched a company's interview process; ingestPrepResearch upserts the profile and
-// tags/creates questions (reusing the shared bank by leetcodeNum so progress carries over).
-export function ingestPrepResearchJob(records: ResultRecord[], dryRun?: boolean): ReconcileResult {
-  const r = ingestPrepResearch(records, dryRun);
-  // "Research questions" is one of the three asset inputs — refresh the company's context.md dump and
-  // write the standalone questions.md (online-research question bank) so the interview-brief job + a
-  // per-company the agent prep chat can read the fresh research. Best-effort; never breaks the ingest.
-  if (!dryRun) {
-    const company = records.map((rec) => str(rec.company)).find(Boolean);
-    const slug = company ? companySlug(company) : null;
-    if (slug) { try { exportPrepContextFor(slug); exportQuestionsFor(slug); } catch { /* dump is best-effort */ } }
-  }
-  const parts: string[] = [];
-  if (r.profile) parts.push("profile");
-  if (r.reused) parts.push(`${r.reused} reused`);
-  if (r.inserted) parts.push(`${r.inserted} new question${r.inserted === 1 ? "" : "s"}`);
-  return {
-    inserted: r.inserted,
-    updated: r.reused + r.profile,
-    fieldChanges: r.reused + r.inserted + r.profile,
-    flagged: 0,
-    pending: 0,
-    newCompanies: 0,
-    summary: parts.join(", ") || "no prep-research changes",
-    details: r.details,
-  };
 }
 
 // Ingest for the watchlist-scan source (legacy submitJobResult path; the live flow is

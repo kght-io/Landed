@@ -230,7 +230,7 @@ function connection() {
     captured_at TEXT NOT NULL
   )`);
   sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS prep_emails_slug_key ON prep_emails(slug, dedup_key)");
-  // Per-(company, round) prep feedback thread → dispatched to the agent as a prep-research refinement.
+  // Per-(company, round) prep feedback thread — retired with question research; kept for its rows.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS prep_feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     slug TEXT NOT NULL,

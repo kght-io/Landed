@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { TEST_DIR } from "./setup";
-import { resolvePrepDir, mdFilesIn, PREP_ROOT } from "@landed/backend/prep/export-context";
+import { resolvePrepDir, ensurePrepDir, ensurePrepFiles, mdFilesIn, PREP_ROOT } from "@landed/backend/prep/export-context";
+import { reset, seedApp } from "./helpers";
 import { prepChatArgs, baseArgs } from "@landed/backend/agents/claude-code";
 
 test("resolvePrepDir: a plain slug resolves inside the interview-prep tree", () => {
@@ -22,6 +23,49 @@ test("resolvePrepDir: traversal / empty slugs are rejected (null), never escape 
   assert.equal(resolvePrepDir("../resume"), null);
   assert.equal(resolvePrepDir(".."), null);
   assert.equal(resolvePrepDir(""), null); // the root itself is not a company folder
+});
+
+test("ensurePrepDir: the folder exists afterwards, even with nothing dumped in it", () => {
+  // The chat spawns with cwd = this folder. A cwd that doesn't exist fails as "spawn claude ENOENT" —
+  // indistinguishable from a missing binary, and it bit every RESUMED turn, which skips the dump
+  // step entirely. So resolving the dir for a chat has to guarantee it.
+  const dir = ensurePrepDir("neverdumped");
+  assert.equal(dir, path.join(PREP_ROOT, "neverdumped"));
+  assert.ok(fs.statSync(dir!).isDirectory(), "the folder is on disk, ready to be a cwd");
+  assert.equal(ensurePrepDir("neverdumped"), dir, "idempotent — a second call is fine");
+});
+
+test("ensurePrepDir: still refuses to leave the interview-prep tree (and creates nothing)", () => {
+  assert.equal(ensurePrepDir("../escape"), null);
+  assert.equal(ensurePrepDir(""), null);
+  assert.ok(!fs.existsSync(path.join(path.dirname(path.resolve(PREP_ROOT)), "escape")));
+});
+
+test("ensurePrepFiles: a RESUMED turn still dumps context.md when the folder is empty", () => {
+  // A stored session can outlive its folder (or predate it). Skipping the dump on resume left the
+  // coach cwd'd into an empty directory with nothing to read.
+  reset();
+  seedApp({ company: "Pendo", role: "Staff Software Engineer", status: "interview" });
+  const ctx = path.join(PREP_ROOT, "pendo", "context.md");
+  fs.rmSync(path.join(PREP_ROOT, "pendo"), { recursive: true, force: true });
+
+  ensurePrepFiles("pendo", { resumed: true });
+  assert.ok(fs.existsSync(ctx), "context.md is dumped even mid-conversation");
+});
+
+test("ensurePrepFiles: a NEW session re-dumps context.md, so nobody has to press a button", () => {
+  // The dump is a render of the DB. Leaving it to a manual click is how a chat ends up coaching from
+  // a stale digest while the tracker has moved on — so opening a conversation refreshes it.
+  reset();
+  seedApp({ company: "Pendo", role: "Staff Software Engineer", status: "interview" });
+  const ctx = path.join(PREP_ROOT, "pendo", "context.md");
+  ensurePrepFiles("pendo");
+  fs.writeFileSync(ctx, "# stale — written by hand\n");
+
+  ensurePrepFiles("pendo"); // a new session, not a resume
+  const after = fs.readFileSync(ctx, "utf8");
+  assert.ok(!after.includes("stale — written by hand"), "the dump was regenerated, not left alone");
+  assert.ok(after.includes("Pendo"), "…and it is the real DB dump");
 });
 
 test("mdFilesIn: lists only .md files, newest first; missing dir is empty", () => {

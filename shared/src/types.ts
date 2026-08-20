@@ -79,7 +79,7 @@ export type RedoTurn = {
 // Source provenance: facts and gaps carry where they came from so you can tell what a human
 // confirmed vs what's inferred. `recruiter` = the first recruiter call transcript or recruiter
 // emails; `jd` = the job description (the fallback when the recruiter didn't say); `online` =
-// prep-research / public sources.
+// public sources the brief job read online.
 export type BriefSource = "recruiter" | "jd" | "online";
 // A single fact plus where it came from. `tc` is a free-text total-comp line (not a numeric field).
 export type SourcedText = { text: string; source?: BriefSource };

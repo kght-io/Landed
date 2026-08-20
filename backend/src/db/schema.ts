@@ -225,10 +225,10 @@ export const todos = sqliteTable("todos", {
 });
 
 // ── Interview prep ──
-// One row per distinct practiceable question — the single source of truth shared by
-// the generic (coding / system design) and company-specific views. `companies` tags
-// which company lenses feature it; `[]` = generic-only. Like `todos`, prep is a
-// personal scratchpad and does NOT write to the `events` change-log.
+// RETIRED (question research was removed; the tables are kept so the rows already in the DB
+// survive). One row per distinct practiceable question — the single source of truth the generic
+// (coding / system design) and company-specific prep views used to share. Nothing writes these
+// tables any more.
 export const prepQuestions = sqliteTable("prep_questions", {
   id: text("id").primaryKey(), // stable slug, e.g. "kway", "lc-23", "news_agg"
   // coding / system_design = the shared generic banks; behavioral / other = company-specific
@@ -251,9 +251,9 @@ export const prepQuestions = sqliteTable("prep_questions", {
   sortOrder: integer("sort_order"),
 });
 
-// One row per company you're prepping for — the research output the agent writes (see the
-// prep-research job). The catalog of questions stays in prep_questions; this holds the
-// company-specific narrative + the ordered category list its view is built from. Keyed by
+// One row per company you're prepping for — the research output the retired prep-research job
+// wrote. Read-only now (getCompanyProfile folds it into the company's context.md dump); the
+// company-specific narrative + the ordered category list its view was built from. Keyed by
 // the same slug used in prepQuestions.companies / companyMeta (canonical company key).
 export const prepCompany = sqliteTable("prep_company", {
   slug: text("slug").primaryKey(),
@@ -267,7 +267,7 @@ export const prepCompany = sqliteTable("prep_company", {
 });
 
 // Per-(company, round) feedback you leave on the prep — appended to a thread and dispatched to
-// The agent as a prep-research refinement job. `status` tracks the loop: queued → applied once the agent
+// RETIRED with question research. `status` tracked the loop: queued → applied once the agent
 // re-researches that round. Like the rest of prep, a personal scratchpad (no events log).
 export const prepFeedback = sqliteTable("prep_feedback", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -399,7 +399,7 @@ export const postings = sqliteTable("postings", {
   note: text("note"),
   // First-hand interview intel you collect in the Interviewing stage (markdown). `comp` = comp
   // structure (funding/runway, base, bonus, equity); `teamNotes` = team / product / work / role
-  // focus. Distinct from the short `team` department tag above. Feeds the prep-research job as
+  // focus. Distinct from the short `team` department tag above. Feeds the interview brief as
   // recruiter-confirmed ground truth (see backend/src/jobs/store.ts queuePrepResearch).
   comp: text("comp"),
   teamNotes: text("team_notes"),

@@ -1,7 +1,7 @@
 import { setConfig, INBOX_SYNCED_KEY } from "../db/config-store";
 import {
   ingestInterviewLoop, ingestTailoring, ingestFit, ingestInterviewBrief,
-  ingestPeerComp, ingestPrep, ingestLeetcodeAddJob, ingestPrepResearchJob, ingestDiscovered,
+  ingestPeerComp, ingestDiscovered,
   noopIngest, unqueueCandidate, ingestInboxSync, peerCompTask,
 } from "./ingest";
 import { recordPromptVersion } from "./prompt-stamp";
@@ -15,7 +15,6 @@ import type { JobDef, JobType } from "@landed/shared/jobs/types";
 //
 // Ordered by pipeline stage (ascending): create → scan → fit → tailor → inbox sync.
 
-// prep / prep-research keep their machinery but are hidden from the agent Jobs list for now.
 export const JOB_DEFS: Record<JobType, JobDef> = {
   "watchlist-add": {
     type: "watchlist-add",
@@ -90,36 +89,6 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
     // Advance the sync watermark now the result is in the DB — this is the only writer of
     // `inbox_last_synced`, which inboxSyncSince() reads to build the next run's search window.
     afterIngest: ({ ingestedAt }) => setConfig(INBOX_SYNCED_KEY, ingestedAt),
-  },
-  prep: {
-    type: "prep",
-    title: "Coding prep",
-    description: "Log coding-practice progress (attempts, times, notes) from an agent session.",
-    playbook: "prep.md",
-    hidden: true,
-    buildTask: () =>
-      `Report the coding-practice progress from our session — one record per question worked — per prep.md.`,
-    ingest: ingestPrep,
-  },
-  "prep-research": {
-    type: "prep-research",
-    title: "Prep research",
-    description: "Research a company's interview process → build a company prep profile + question set.",
-    playbook: "prep-research.md",
-    buildTask: (p) =>
-      `Research the interview process at ${p?.company ?? "the company"} (rounds, categories, past questions) and submit a prep profile + categorized questions via submitJobResult per prep-research.md.${
-        p?.intel ? " params.intel holds recruiter-confirmed comp/team/rounds — treat it as authoritative ground truth and only research to fill gaps." : ""
-      }`,
-    ingest: ingestPrepResearchJob,
-  },
-  "leetcode-add": {
-    type: "leetcode-add",
-    title: "Add Leetcode Question",
-    description: "Resolve a manually-added LeetCode URL — fill the problem name, difficulty, and topic on the stub.",
-    playbook: "leetcode-add.md",
-    buildTask: (p) =>
-      `A LeetCode question stub (id \`${p?.id ?? "in params.id"}\`) was added from ${p?.url ? `\`${p.url}\`` : "the URL in params.url"}. Determine its exact problem name, difficulty (Easy/Medium/Hard), and — unless params.topic is set — the primary topic/pattern (e.g. Heap, Graphs, DP). Submit one record { id, name, difficulty, topic, leetcodeNum? } via submitJobResult(type:"leetcode-add") per leetcode-add.md.`,
-    ingest: ingestLeetcodeAddJob,
   },
   "interview-brief": {
     type: "interview-brief",

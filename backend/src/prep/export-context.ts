@@ -2,18 +2,18 @@
 //
 // Each context.md is a single markdown dump of EVERYTHING the app knows about a company — recruiter
 // notes + first-hand comments (comp / team / the real loop), the interview rounds, the fit
-// assessment, the JD, and the researched prep profile + question set. The point: open one the agent
+// assessment, the JD, and the researched prep profile. The point: open one the agent
 // chat per company, point it at that folder, and prep with the full context already on disk.
 //
 // Reads postings/interviews via Drizzle directly (NOT backend/src/db/queries) so it stays decoupled from the
-// job-queue code; it reuses backend/src/db/prep for the researched profile + question folding. Shared by the
-// CLI (`npm run prep:export`) and the in-app per-company "Dump context" button.
+// job-queue code; it reuses backend/src/db/prep for the researched profile. Shared by the
+// CLI (`npm run prep:export`), the chat/brief auto-refresh, and the drawer's manual re-dump.
 import fs from "node:fs";
 import path from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { postings, companies, interviews } from "../db/schema";
-import { getCompanyProfile, listQuestions, companySlug, type CompanyProfile, type PrepQuestion } from "../db/prep";
+import { getCompanyProfile, companySlug, type CompanyProfile } from "../db/prep";
 import { listPrepEmails, listTranscriptRows } from "../db/prep-assets";
 import { exportTranscriptsFor } from "./transcripts";
 import { PREP_ROOT, writeFresh } from "./root";
@@ -24,7 +24,6 @@ import type { InterviewRound, FitAssessment, Comment, EmailRefs, PrepEmail } fro
 export { PREP_ROOT };
 
 const contextPath = (slug: string) => path.join(PREP_ROOT, slug, "context.md");
-const questionsPath = (slug: string) => path.join(PREP_ROOT, slug, "questions.md");
 const emailsPath = (slug: string) => path.join(PREP_ROOT, slug, "emails.md");
 
 // A prep chat is scoped to one company's folder. Resolve <PREP_ROOT>/<slug> safely — null if the
@@ -36,9 +35,20 @@ export function resolvePrepDir(slug: string): string | null {
   return full;
 }
 
+// Same resolution, but the folder is guaranteed to exist afterwards — what a chat needs, because it
+// spawns with cwd = this directory and a missing cwd surfaces as "spawn claude ENOENT" (the binary
+// looks missing when it isn't). A company with nothing dumped yet — or a RESUMED turn, which skips
+// the dump step — would otherwise cwd into nothing. Null (and no mkdir) for a slug that escapes.
+export function ensurePrepDir(slug: string): string | null {
+  const dir = resolvePrepDir(slug);
+  if (!dir) return null;
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* best-effort: the spawn reports it */ }
+  return dir;
+}
+
 export type PrepFile = { name: string; size: number; mtime: string };
 
-// The markdown research outputs sitting in a directory (context.md, questions.md, …), newest first —
+// The markdown research outputs sitting in a directory (context.md, emails.md, …), newest first —
 // the "context files" a prep chat is working from. Pure over the dir so it's unit-testable.
 export function mdFilesIn(dir: string): PrepFile[] {
   let entries: string[];
@@ -58,19 +68,24 @@ export function listPrepFiles(slug: string): PrepFile[] {
   return dir ? mdFilesIn(dir) : [];
 }
 
-// Make sure a company's prep .md files exist before a chat cwds into the folder to read them. Dumps
-// context.md / questions.md only when MISSING (the "Dump context" button force-refreshes from the
-// DB). Best-effort: a cloud-sync write hiccup must never block the chat from opening.
+// Put a company's prep files on disk before a chat cwds into the folder to read them.
 //
-// The knowledge dumps (emails.md, transcripts/) are refreshed even when context.md is already
-// there — they only rewrite what changed, and they're the files the coach actually reads, so a chat
-// opening on a stale one would be reading knowledge the DB has already moved past. When context.md
-// IS being regenerated we let exportPrepContextFor do them, rather than writing every file twice.
-export function ensurePrepFiles(slug: string): void {
-  const regenerating = !prepContextDumpedAt(slug);
-  try { if (regenerating) exportPrepContextFor(slug); } catch { /* best-effort */ }
-  try { if (!questionsDumpedAt(slug)) exportQuestionsFor(slug); } catch { /* best-effort */ }
-  if (regenerating) return;
+// A NEW conversation re-dumps context.md outright rather than only when it's missing. The dump is a
+// render of the database — cheap, and always right by construction — so the only thing "regenerate
+// only if absent" ever bought was a stale digest: a coach citing a fit assessment or a loop from
+// before the tracker moved, while emails.md and transcripts/ next to it were current. Nobody should
+// have to remember to press a button to keep the app's own view of a company honest.
+//
+// `resumed` turns skip the refresh — mid-conversation the coach has already read these files, and
+// rewriting them under it buys nothing — but a resume still repairs a MISSING context.md, because a
+// stored session can outlive its folder and a coach with no context at all is the worse failure.
+export function ensurePrepFiles(slug: string, opts: { resumed?: boolean } = {}): void {
+  ensurePrepDir(slug); // the folder itself, even when there is nothing to dump into it
+  if (!opts.resumed || !prepContextDumpedAt(slug)) {
+    // exportPrepContextFor refreshes the knowledge dumps too, so this is the whole folder.
+    try { exportPrepContextFor(slug); } catch { /* best-effort: a write hiccup must not block the chat */ }
+    return;
+  }
   try { exportTranscriptsFor(slug); } catch { /* best-effort */ }
   try { exportEmailsFor(slug); } catch { /* best-effort */ }
 }
@@ -87,11 +102,6 @@ const KIND_LABEL: Record<string, string> = {
   system_design: "System design", behavioral: "Behavioral", onsite: "Onsite",
   hiring_manager: "Hiring manager", final: "Final", other: "Interview",
 };
-const TRACKERS: { key: PrepQuestion["track"][]; label: string }[] = [
-  { key: ["coding"], label: "LeetCode" },
-  { key: ["system_design"], label: "System Design" },
-  { key: ["behavioral", "other"], label: "Other / bespoke" },
-];
 
 const parse = <T,>(raw: string | null | undefined, fallback: T): T => {
   if (!raw) return fallback;
@@ -119,28 +129,9 @@ function fitBlock(c: Co): string {
   return lines.join("\n");
 }
 
-function questionsBlock(questions: PrepQuestion[]): string {
-  if (!questions.length) return "";
-  const out: string[] = ["## Question set (reuses your shared LeetCode / System-Design banks)"];
-  for (const t of TRACKERS) {
-    const qs = questions.filter((q) => t.key.includes(q.track));
-    if (!qs.length) continue;
-    qs.sort((a, b) => (a.companyConfidence === "confirmed" ? 0 : 1) - (b.companyConfidence === "confirmed" ? 0 : 1));
-    out.push(`\n### ${t.label} (${qs.length})`);
-    for (const q of qs) {
-      const tag = q.companyConfidence === "confirmed" ? "🟢 confirmed" : "🟡 likely";
-      const bits = [q.leetcodeNum ? `LC ${q.leetcodeNum}` : null, q.difficulty || null].filter(Boolean).join(" · ");
-      out.push(`- **${q.name}**${bits ? ` (${bits})` : ""} — ${tag}`);
-      if (q.companyConfidenceReason) out.push(`  - why: ${q.companyConfidenceReason}`);
-      if (q.companySource) out.push(`  - source: ${q.companySource}`);
-      if (q.prompt) out.push(`  - ${q.prompt}`);
-    }
-  }
-  return out.join("\n");
-}
 
 function profileBlock(profile: CompanyProfile | null): string {
-  if (!profile) return "_No researched prep profile yet — run prep-research for this company._";
+  if (!profile) return "_No researched prep profile for this company._";
   const out: string[] = [];
   if (profile.overview) out.push(`### Company & product\n${profile.overview}`);
   if (profile.process) out.push(`### Interview process\n${profile.process}`);
@@ -224,7 +215,7 @@ function capturedEmailsBlock(slug: string): string {
   return out.join("\n");
 }
 
-function buildContext(company: string, slug: string, rows: Co[], profile: CompanyProfile | null, questions: PrepQuestion[]): string {
+function buildContext(company: string, slug: string, rows: Co[], profile: CompanyProfile | null): string {
   const today = new Date().toISOString().slice(0, 10);
   const lead = rows[0];
   const out: string[] = [
@@ -245,8 +236,6 @@ function buildContext(company: string, slug: string, rows: Co[], profile: Compan
   const fit = rows.map(fitBlock).filter(Boolean).join("\n\n");
   if (fit) out.push(`\n${fit}`);
   out.push(`\n## Researched prep profile\n${profileBlock(profile)}`);
-  const qs = questionsBlock(questions);
-  if (qs) out.push(`\n${qs}`);
   const jd = rows.map((r) => r.jd).find(Boolean);
   if (jd) out.push(`\n## Job description\n\n\`\`\`\n${jd}\n\`\`\``);
   const captured = capturedEmailsBlock(slug);
@@ -340,47 +329,17 @@ export function exportPrepContextFor(slug: string): { at: string } | null {
   const g = gatherCompany(slug);
   if (!g) return null;
   const profile = getCompanyProfile(slug);
-  const questions = profile ? listQuestions({ company: slug }) : [];
   // Best-effort: a cloud-sync write hiccup on one dump must not cost us the context file.
   try { exportTranscriptsFor(slug); } catch { /* dump is best-effort */ }
   try { exportEmailsFor(slug); } catch { /* dump is best-effort */ }
   fs.mkdirSync(path.dirname(contextPath(slug)), { recursive: true });
-  fs.writeFileSync(contextPath(slug), buildContext(g.company, slug, g.rows, profile, questions));
+  fs.writeFileSync(contextPath(slug), buildContext(g.company, slug, g.rows, profile));
   return { at: new Date().toISOString() };
 }
 
 // When the context.md for a company was last written (file mtime), or null if none yet.
 export function prepContextDumpedAt(slug: string): string | null {
   try { return fs.statSync(contextPath(slug)).mtime.toISOString(); } catch { return null; }
-}
-
-// Standalone question-research output (`questions.md`) — the PURELY ONLINE-researched question bank
-// from the prep-research job: the researched process, rounds, and question set (with confidence +
-// sources), as a clean file to work from in a per-company the agent prep chat (separate from the full
-// context.md dump). Returns the write time, or null if the slug has no researched profile yet.
-export function exportQuestionsFor(slug: string): { at: string } | null {
-  const g = gatherCompany(slug);
-  const profile = getCompanyProfile(slug);
-  if (!g || !profile) return null;
-  const questions = listQuestions({ company: slug });
-  const today = new Date().toISOString().slice(0, 10);
-  const out: string[] = [
-    `# ${g.company} — interview questions (online research)`,
-    `_Researched ${today}. Public-source question bank from the prep-research job — 🟢 confirmed = reported as actually asked, 🟡 likely = predicted. Cross-check against your own recruiter intel._`,
-  ];
-  if (profile.process) out.push(`\n## Interview process\n${profile.process}`);
-  if (profile.rounds.length) out.push(`\n## Rounds\n` + profile.rounds.map((r) => `- **${r.name}**${r.format ? ` (${r.format})` : ""}${r.focus ? ` — ${r.focus}` : ""}`).join("\n"));
-  const qs = questionsBlock(questions);
-  if (qs) out.push(`\n${qs}`);
-  if (profile.sources.length) out.push(`\n## Sources\n` + profile.sources.map((s) => `- ${s.url ? `[${s.label}](${s.url})` : s.label}`).join("\n"));
-  fs.mkdirSync(path.join(PREP_ROOT, slug), { recursive: true });
-  fs.writeFileSync(questionsPath(slug), out.join("\n") + "\n");
-  return { at: new Date().toISOString() };
-}
-
-// When questions.md was last written (file mtime), or null if none yet.
-export function questionsDumpedAt(slug: string): string | null {
-  try { return fs.statSync(questionsPath(slug)).mtime.toISOString(); } catch { return null; }
 }
 
 // Export EVERY interview/offer-stage company + a README index. Used by the CLI.
@@ -403,9 +362,10 @@ export function exportAllPrepContext(): { slug: string; company: string }[] {
     `# Interview prep`, ``,
     `One subfolder per company I'm interviewing with. Each \`<slug>/context.md\` is a full dump of`,
     `everything Landed knows about that company — my notes + first-hand intel, the interview`,
-    `loop, the fit assessment, the JD, and the researched prep profile + question set.`, ``,
+    `loop, the fit assessment, and the JD.`, ``,
     `**To prep:** open an agent chat per company and point it at that company's \`context.md\`.`,
-    `Regenerate from the app (each company's "Dump context" button) or all at once with`,
+    `The app refreshes these when a prep chat opens or an interview brief is queued; regenerate them`,
+    `all at once with`,
     `\`npm run prep:export\`. Overwrites context.md; never deletes folders, so notes you add survive.`, ``,
     `## Companies`, ...index, ``,
   ].join("\n");

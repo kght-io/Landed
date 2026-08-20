@@ -393,7 +393,6 @@ export default function Pipeline() {
       reload();
       if (r && typeof r.companies === "number") {
         const bits = [`${r.companies} ${r.companies === 1 ? "company" : "companies"}`];
-        if (r.researchQueued) bits.push(`${r.researchQueued} new research`);
         if (r.inboxSync) bits.push("inbox sync");
         setUpdateNote(`Queued: ${bits.join(" · ")}`);
       }

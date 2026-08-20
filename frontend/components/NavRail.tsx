@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Briefcase, History, Bot, GraduationCap, LayoutDashboard, Settings, UserCircle, Plus, Radar, Activity } from "lucide-react";
+import { Home, Briefcase, History, Bot, LayoutDashboard, Settings, UserCircle, Plus, Radar, Activity } from "lucide-react";
 import { useAddJob } from "@/components/AddJobProvider";
 
 // The rail is grouped into clusters (rendered with a divider between each); each item's optional
@@ -13,7 +13,6 @@ const GROUPS = [
   [
     { href: "/", label: "Home", icon: Home },
     { href: "/watchlist", label: "Watchlist", icon: Radar },
-    { href: "/prep", label: "Prep", icon: GraduationCap },
   ],
   [{ href: "/agents", label: "Agents", icon: Bot }],
   [

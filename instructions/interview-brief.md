@@ -21,7 +21,7 @@ the app's company drawer (Interview stage). One record in, one new version out.
    - `interview-prep/<slug>/attachments/*` — any role PDFs / prep guides / take-homes recruiters sent.
 2. **Synthesize the brief, tagging every field's source.** `source` ∈ `recruiter` (the recruiter said
    it — the recruiter call transcript or recruiter emails), `jd` (from the job description), `online`
-   (prep-research / public sources). Facts are `{ "text": …, "source": … }`:
+   (what you found online / public sources). Facts are `{ "text": …, "source": … }`:
    - `role` — the role as it actually is. Prefer the recruiter call → JD fallback.
    - `tc` — one clean total-comp line (base · bonus · equity · funding/runway). Recruiter call → JD
      fallback. Free-text, not a number; omit if genuinely unknown.

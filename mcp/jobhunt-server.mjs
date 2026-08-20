@@ -28,7 +28,6 @@
 //   upsertCompanies   → add/update company records (tier + scrape config)
 //   addToWatchlist / removeFromWatchlist → manage the discovery scan list (separate concern)
 //   updateApplication → manual posting corrections
-//   logMockInterview  → capture a mock-interview session into interview-prep/GLOBAL/mock-interviews/
 // The job queue + ledger now live in the app's DB; the agent-jobs/ and app-export/ files
 // are retired. Resume bundles in resume/<slug>/ stay on disk by design (binary artifacts).
 
@@ -238,7 +237,6 @@ const RUNNERS = {
 
   removeFromWatchlist: async (args) => apiSend("DELETE", `/api/watchlist?company=${encodeURIComponent(args.company)}`),
 
-  logMockInterview: async (args) => apiSend("POST", "/api/prep/global/mock-interview", args),
 };
 
 // Bind each shared schema to its runner. A schema with no runner would advertise a tool that can't

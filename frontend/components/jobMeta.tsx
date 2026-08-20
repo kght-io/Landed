@@ -1,9 +1,8 @@
-import { Mail, Sparkles, Scissors, Bot, Radar, Building2, GraduationCap, FlaskConical, Code2 } from "lucide-react";
+import { Mail, Sparkles, Scissors, Bot, Radar, Building2 } from "lucide-react";
 
 // Per job-type presentation, shared by the Agents page and the floating queue so they never drift.
 export const JOB_ICON: Record<string, typeof Mail> = {
   "watchlist-add": Building2, "watchlist-scan": Radar, "inbox-sync": Mail, fit: Sparkles, tailoring: Scissors,
-  prep: GraduationCap, "prep-research": FlaskConical, "leetcode-add": Code2,
 };
 export const jobIcon = (type: string) => JOB_ICON[type] ?? Bot;
 
@@ -22,9 +21,6 @@ export const AGENT_COLOR: Record<string, string> = {
   "watchlist-scan": "text-cyan-300",
   "watchlist-add": "text-blue-300",
   leveling: "text-fuchsia-300",
-  "prep-research": "text-teal-300",
-  prep: "text-lime-300",
-  "leetcode-add": "text-orange-300",
   discovery: "text-sky-300",
 };
 export const agentColor = (type: string) => AGENT_COLOR[type] ?? "text-sky-300";
@@ -32,8 +28,7 @@ export const agentColor = (type: string) => AGENT_COLOR[type] ?? "text-sky-300";
 // Short verb label for a queued job, e.g. the chip on a queue row.
 export const JOB_VERB: Record<string, string> = {
   "watchlist-add": "Add company", "watchlist-scan": "Scan watchlist", "inbox-sync": "Sync inbox",
-  fit: "Assess fit", tailoring: "Tailor resume", prep: "Coding prep", "prep-research": "Prep research",
-  "leetcode-add": "Add leetcode Q",
+  fit: "Assess fit", tailoring: "Tailor resume",
 };
 export const jobVerb = (type: string) => JOB_VERB[type] ?? type;
 
@@ -41,8 +36,7 @@ export const jobVerb = (type: string) => JOB_VERB[type] ?? type;
 // the type-scoped "copy prompt" can name the exact instructions/<file> for the chosen queue.
 export const JOB_PLAYBOOK: Record<string, string> = {
   "watchlist-add": "watchlist-add.md", leveling: "leveling.md", "watchlist-scan": "watchlist-scan.md",
-  fit: "fit.md", tailoring: "tailoring.md", "inbox-sync": "inbox-sync.md", prep: "prep.md", "prep-research": "prep-research.md",
-  "leetcode-add": "leetcode-add.md",
+  fit: "fit.md", tailoring: "tailoring.md", "inbox-sync": "inbox-sync.md",
 };
 export const jobPlaybook = (type: string) => JOB_PLAYBOOK[type] ?? `${type}.md`;
 

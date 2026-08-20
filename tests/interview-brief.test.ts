@@ -1,12 +1,15 @@
 import "./setup";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import { reset, seedApp, db, jobs } from "./helpers";
 import { getPosting } from "@landed/backend/db/queries";
 import { enqueueInterviewBrief, enqueueInterviewEmails } from "@landed/backend/jobs/store";
 import { jobDef } from "@landed/backend/jobs/registry";
 import { nextTranscriptName } from "@landed/backend/prep/transcripts";
+import { PREP_ROOT } from "@landed/backend/prep/export-context";
 
 beforeEach(() => reset());
 
@@ -132,4 +135,16 @@ test("nextTranscriptName numbers sequentially and never collides", () => {
   assert.equal(nextTranscriptName(["transcript-1.md"]), "transcript-2.md");
   // Gaps + non-transcript files are ignored; it always goes past the highest existing index.
   assert.equal(nextTranscriptName(["transcript-1.md", "transcript-5.md", "notes.md"]), "transcript-6.md");
+});
+
+test("enqueueInterviewBrief dumps the folder first — the job never reads a stale context.md", () => {
+  // The brief is synthesized from what's on disk. Queuing it used to leave that to a separate button,
+  // so a brief could be built from a digest older than the tracker rows it claims to summarize.
+  const id = seedApp({ company: "Acme", role: "Backend Engineer", status: "interview" });
+  const ctx = path.join(PREP_ROOT, "acme", "context.md");
+  fs.rmSync(path.join(PREP_ROOT, "acme"), { recursive: true, force: true });
+
+  enqueueInterviewBrief(id);
+  assert.ok(fs.existsSync(ctx), "context.md is dumped as part of queuing the job");
+  assert.ok(fs.readFileSync(ctx, "utf8").includes("Acme"));
 });

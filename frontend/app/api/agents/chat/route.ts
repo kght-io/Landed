@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { CLAUDE_BIN, mcpConfigPath, claudeEnv, baseArgs, prepChatArgs } from "@landed/backend/agents/claude-code";
-import { PREP_ROOT, resolvePrepDir, ensurePrepFiles } from "@landed/backend/prep/export-context";
+import { PREP_ROOT, ensurePrepDir, ensurePrepFiles } from "@landed/backend/prep/export-context";
 import { REPO_ROOT } from "@landed/backend/paths";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +21,10 @@ const run = promisify(execFile);
 //   dumped (if missing) before the first turn so they're on disk to read.
 // - without a slug → the FULL agent (general chat / drain runner): repo cwd, jobhunt MCP, asset write.
 async function runTurn(opts: { message: string; sid: string; resume: boolean; context?: string; slug?: string }) {
-  const prepDir = opts.slug ? resolvePrepDir(opts.slug) : null;
-  if (prepDir && !opts.resume) ensurePrepFiles(opts.slug!); // fresh context files before turn one
+  // ensurePrepDir, not resolvePrepDir: the folder is this turn's cwd, so it has to be there on EVERY
+  // turn — a resume skips the dump below, and a company nobody has dumped yet has no folder at all.
+  const prepDir = opts.slug ? ensurePrepDir(opts.slug) : null;
+  if (prepDir) ensurePrepFiles(opts.slug!, { resumed: opts.resume }); // context files on disk before the turn
   const args = [
     "-p", opts.message,
     ...(opts.resume ? ["-r", opts.sid] : ["--session-id", opts.sid]),

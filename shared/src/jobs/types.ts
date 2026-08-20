@@ -9,9 +9,6 @@ export type JobType =
   | "inbox-sync"
   | "fit"
   | "tailoring"
-  | "prep"
-  | "prep-research"
-  | "leetcode-add"
   | "interview-brief"
   | "interview-emails"
   | "peer-comp";

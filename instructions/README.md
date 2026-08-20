@@ -17,7 +17,7 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
   by editing files. Reads: `listJobs`/`getPlaybook`/`listApplications`/`listWatchlist`/
   `listCompanies`/`getContext`/`scanWatchlist`/`scanCompany`/`searchGmail`/`getGmailThread`. Writes:
   `claimNext`/`claimJob`/`submitJobResult`/`submitGlance`/`savePostingJd`/`createJob`/
-  `upsertCompanies`/`addToWatchlist`/`removeFromWatchlist`/`updateApplication`/`logMockInterview`.
+  `upsertCompanies`/`addToWatchlist`/`removeFromWatchlist`/`updateApplication`.
 - A second server, **`landed-local`**, is the machine you are running on — the user's own disk,
   which the DB above knows nothing about. `readBaseResumeText` and `buildTailoredResume` are how
   résumés get written (see `tailoring.md`); they replace the old `npm run tailor:docx` shell step.
@@ -43,16 +43,10 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
 ├── instructions/            ← this file + one playbook per job type (the docs)
 ├── interview-prep/          ← per-company prep context + interview-brief materials
 │   ├── README.md            ← index of companies I'm interviewing with
-│   ├── GLOBAL/              ← cross-company interview readiness (see readiness.md playbook)
-│   │   ├── readiness.md    ← living global assessment: upcoming interviews, current focus, gap ledger
-│   │   ├── stories.md      ← my STAR story bank (status per story)
-│   │   ├── experience/     ← my experience corpus: _resume.md seed + one .md per Google Doc write-up
-│   │   ├── mock-interviews/ ← mock-practice sessions (session-*.md) pushed via the logMockInterview MCP tool
-│   │   └── career/         ← my whole Obsidian Career vault: behavioral answers, project write-ups, trade-offs, resume (symlinked in; read-only)
+│   ├── GLOBAL/              ← cross-company material the user keeps by hand (no job writes here)
 │   └── <company-slug>/
-│       ├── context.md       ← DB dump: intel, loop, fit, JD, prep profile + Qs (refreshed by Research questions)
-│       ├── questions.md     ← online-research question bank the Research questions job writes (input #2)
-│       ├── transcripts/     ← DB dump: call transcripts the user pastes (input #3) — READ-ONLY
+│       ├── context.md       ← DB dump: intel, loop, fit, JD, prep profile
+│       ├── transcripts/     ← DB dump: call transcripts the user pastes (input #2) — READ-ONLY
 │       ├── emails.md        ← DB dump: interviewing emails you capture (input #1) — READ-ONLY
 │       └── attachments/     ← role PDFs / prep guides / take-homes the interview-emails job downloads
 └── resume/
@@ -64,27 +58,22 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
 Infra/Ads). Everything else — queue, ledger, tracker, companies — is in the app's DB, reached
 over MCP.
 
-**`interview-prep/`** is regenerated from the app DB by `npm run prep:export` (the app side; not an
-MCP job). When you open a **per-company prep chat**, read that company's `interview-prep/<slug>/
+**`interview-prep/`** is regenerated from the app DB — automatically whenever a prep chat opens or an
+interview-brief job is queued, and in bulk by `npm run prep:export` (the app side; not an MCP job).
+So a folder you are handed is current: do not ask the user to "dump context" first. When you open a **per-company prep chat**, read that company's `interview-prep/<slug>/
 context.md` first — it's the single brief for prepping the user on that company (the real loop, comp,
-team, fit, JD, and the researched question set with sources). Notes added to a company's folder
-during a chat survive re-exports.
+team, fit, JD). Notes added to a company's folder during a chat survive re-exports.
 
-**Knowledge lives in the DB; files are dumps.** `context.md`, `questions.md`, `emails.md`, and
+**Knowledge lives in the DB; files are dumps.** `context.md`, `emails.md`, and
 `transcripts/*.md` are all **generated from the app database** and overwritten on every refresh —
 read them freely, but **never write them**, because the next export throws your edit away. To change
 what they say, change the DB: submit an `interview-emails` result with `emails` records (below).
 The exception is `attachments/` and `resume/`, which are real files — artifacts, not knowledge — and
 the only things in this tree that exist nowhere else.
 
-**`interview-prep/GLOBAL/`** is the **cross-company readiness layer** — the opposite altitude from a
-per-company prep chat. When you open a **readiness chat**, follow `readiness.md` (below): read
-**all** companies' transcripts + `context.md` + the user's mock-practice sessions
-(`GLOBAL/mock-interviews/`) + the user's Obsidian career vault (`GLOBAL/career/` — behavioral answers,
-project write-ups, trade-offs, resume), keep the global **gap
-ledger** and **story bank** current, sync the user's project write-ups from Google Drive into
-`experience/`, and answer "what should I study/do next" across every active interview. It's chat-driven
-(no queued job) and all writes are local markdown the user can edit; merge, don't clobber.
+**`interview-prep/GLOBAL/`** holds cross-company material the user maintains by hand (story bank,
+experience corpus, career vault). No job reads or writes it — a per-company prep chat may read up
+into it for general interview-readiness material, and that is all.
 
 ## Your run, in order
 1. **Process the queue** (below). If it's empty, **self-initiate** today's jobs (see
@@ -167,30 +156,12 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
 - `watchlist-scan.md` — check watchlisted companies' boards for new postings
 - `fit.md` — score fit for postings
 - `tailoring.md` — tailor a resume per posting
-- `prep.md` — interview-prep work for a tracked posting
-- `prep-research.md` — research a company's interview process / loop (prioritizing **past, actually-
-  asked questions**) → builds its prep page at `/prep/company/<slug>` (also surfaced under **Prep →
-  Interviewing now**): a product/company `overview`, keyed `rounds`, and questions split into three
-  trackers — **LeetCode** and **System Design** (reusing the shared question banks so attempt
-  history carries across companies) and **Other** (bespoke/behavioral). Each question carries a
-  clickable **confidence** tag (🟢 confirmed / 🟡 likely, with reason + **source — required on every
-  question**). Auto-queued when a posting enters the interview stage. A docked **Claude Code chat**
-  (one session per company, seeded with the profile + the jobhunt MCP tools) sits on the right of the
-  prep page where you iterate; when you ask it to change the prep, revise + **re-submit the FULL
-  profile** (the app upserts). A job may also arrive with `params.refine`.
-  In the company drawer's Interview stage this is the **Research questions** button, one of three
-  asset inputs in the prep-materials panel (alongside **Pull interview emails** and **Add transcript**).
-  Pressing it re-queues this job and, on ingest, refreshes `interview-prep/<slug>/context.md` and writes
-  the standalone `questions.md` (the purely online-research question bank). A job
-  may still arrive with `params.intel` (recruiter-confirmed comp/team/rounds) — treat it as authoritative
-  if present.
-- `leetcode-add.md` — resolve a manually-added LeetCode URL: fill the stub's problem name, difficulty,
-  and (unless the user set one) topic. Small self-contained job — queued when you paste a URL into the
-  Leetcode tracker (General Prep → Leetcode). Fills the existing stub by `id`; never duplicates.
 - `interview-brief.md` — synthesize a **versioned, source-tagged interview brief** (role · TC · team ·
   what-they're-looking-for · next step · gaps-to-prep) from everything already dumped under
-  `interview-prep/<slug>/` (`context.md` + `transcripts/` + `emails.md` + `attachments/`). Queued by the
-  **Generate brief** button. Prefer the first recruiter call transcript for comp/role/team/expectations
+  `interview-prep/<slug>/` (`context.md` + `transcripts/` + `emails.md` + `attachments/`). **Auto-queued
+  when a posting enters the interview stage** (from the board or from an inbox-sync status move), and
+  re-queued on demand by the **Generate brief** button. The auto-queue skips a posting that already
+  has a brief job, so re-entering the stage never supersedes a brief that ran. Prefer the first recruiter call transcript for comp/role/team/expectations
   (JD fallback), and tag each fact + gap `recruiter` | `jd` | `online`. Submit ONE `interview-brief`
   record; each run appends a new version.
 - `interview-emails.md` — **capture** a company's interviewing emails (recruiter outreach, scheduling,
@@ -208,8 +179,7 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   It does NOT touch application **status** — global inbox-sync owns that.
   - The pipeline's Interviewing view also has a global **Update interview status** button that fans
     this out in one click: a global inbox-sync, then for EVERY interview/offer company it refreshes
-    `context.md` on disk, (re)queues this `interview-emails` job, and queues `prep-research` only where
-    it's never been done.
+    `context.md` on disk and (re)queues this `interview-emails` job.
 - `peer-comp.md` — **research + synthesize a compensation comparison** across the roles being actively
   interviewed for (every posting in the interview/offer stage). Start from each role's stored intel
   (`comp` free-text + the latest interview-brief TC + `interview-prep/<slug>/`), then research external
@@ -218,16 +188,6 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   `{ markdown }`. **Global** (not tied to a posting) — the run **overwrites** the latest in app_config
   (latest-only, no version history). Queued by the **Generate / Regenerate** button in the **Peer comp
   comparison** popup, which opens from the **Compare comp** button on the pipeline's Interviewing view.
-- `readiness.md` — **chat-driven, not a queued job.** My **global interview-readiness assistant**:
-  keeps a cross-company gap ledger + STAR story bank + experience corpus under
-  `interview-prep/GLOBAL/`, inferring recurring weaknesses from **all** transcripts **plus my
-  mock-practice sessions** (`GLOBAL/mock-interviews/`, captured by the `logMockInterview` MCP tool),
-  reconciling my **Obsidian career vault** (`GLOBAL/career/`, symlinked from Obsidian — latest behavioral
-  answers, project write-ups, trade-offs, resume) into the story bank + experience corpus, syncing my
-  Google Docs project write-ups from a named Drive folder, and answering "what
-  should I study/do next" across every active interview. Read-only on Drive/Gmail; all writes are local
-  markdown I can edit.
-
 > **The discovery funnel (glance → fit → tailor → apply):** `watchlist-scan` is a cheap **glance**
 > — you judge each candidate on **title + location only, NO JD** — and you submit a verdict per
 > posting with **`submitGlance`**: **high** → the candidate enters the **fit queue** **and a `fit`

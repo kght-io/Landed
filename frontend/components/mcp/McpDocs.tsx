@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Lock, Pencil } from "lucide-react";
-import TabBar from "@/components/prep/TabBar";
+import TabBar from "@/components/TabBar";
 import type { McpCategory, McpToolDoc } from "@/lib/mcp-tools";
 
 // Per-category presentation: the four capabilities the agent works in. Order here = tab order.

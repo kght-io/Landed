@@ -1,6 +1,5 @@
-import { eq } from "drizzle-orm";
 import { db } from "./index";
-import { postings, companies, prepAttempts, prepQuestions, prepCompany, jobs, events } from "./schema";
+import { postings, companies, jobs, events } from "./schema";
 import { APPLIED_STATES, OFFER_STATES } from "@landed/shared/experiments/prompts";
 
 // Dashboard aggregation — everything the /dashboard page shows, computed from existing tables in one
@@ -18,15 +17,12 @@ export type Tone = "good" | "warning" | "critical" | "neutral" | "accent";
 // (no refetch).
 export type Ranged<T> = { week: T[]; month: T[] };
 export type SeriesPoint = { key: string; label: string; count: number };
-export type PrepPoint = { key: string; label: string; leetcode: number; systemDesign: number };
 export type DashboardStats = {
   kpis: { applied: number; interviewed: number; offers: number; active: number; assessed: number; watchlist: number };
   rates: { interview: number; offer: number }; // fractions 0–1, of applied
   funnel: { key: string; label: string; count: number }[]; // cumulative, ordered
   outcomes: { key: string; label: string; count: number; tone: Tone }[]; // of applications
   applications: Ranged<SeriesPoint>; // applications by appliedDate
-  prep: Ranged<PrepPoint>; // two lines: leetcode problems solved + system-design problems practiced
-  prepTotals: { attempts: number; companies: number };
   agent: { done: number; queued: number; wip: number };
   recent: { at: string; summary: string; actor: string }[]; // last activity from the change log
 };
@@ -107,28 +103,11 @@ export function dashboardStats(now: Date = new Date()): DashboardStats {
     month: fill(monthAxis(now), appliedPostings, (p) => monthKey(p.appliedDate!)),
   };
 
-  // Prep progress over time — two lines: leetcode problems SOLVED (coding track, status solved) and
-  // system-design problems PRACTICED (any attempt on the system_design track).
-  const attempts = db
-    .select({ at: prepAttempts.attemptedAt, status: prepAttempts.status, track: prepQuestions.track })
-    .from(prepAttempts)
-    .innerJoin(prepQuestions, eq(prepAttempts.questionId, prepQuestions.id))
-    .all();
-  const prep = {
-    week: prepSeries(weekAxis(now), attempts, weekKey),
-    month: prepSeries(monthAxis(now), attempts, monthKey),
-  };
-
   const js = db.select({ status: jobs.status }).from(jobs).all();
   const agent = {
     done: js.filter((j) => j.status === "ingested").length,
     queued: js.filter((j) => j.status === "queued").length,
     wip: js.filter((j) => j.status === "wip").length,
-  };
-
-  const prepTotals = {
-    attempts: attempts.length,
-    companies: db.select({ slug: prepCompany.slug }).from(prepCompany).all().length,
   };
 
   const recent = db
@@ -146,8 +125,6 @@ export function dashboardStats(now: Date = new Date()): DashboardStats {
     funnel,
     outcomes,
     applications,
-    prep,
-    prepTotals,
     agent,
     recent,
   };
@@ -160,21 +137,6 @@ function fill<R>(axis: SeriesPoint[], rows: R[], keyOf: (r: R) => string): Serie
   for (const r of rows) {
     const i = idx.get(keyOf(r));
     if (i != null) out[i].count += 1;
-  }
-  return out;
-}
-
-// Tally prep attempts into two lines per bucket: leetcode = solved coding attempts, systemDesign =
-// any system_design attempt.
-type Attempt = { at: string; status: string; track: string };
-function prepSeries(axis: SeriesPoint[], rows: Attempt[], keyOf: (iso: string) => string): PrepPoint[] {
-  const out: PrepPoint[] = axis.map((b) => ({ key: b.key, label: b.label, leetcode: 0, systemDesign: 0 }));
-  const idx = new Map(out.map((b, i) => [b.key, i]));
-  for (const r of rows) {
-    const i = idx.get(keyOf(r.at));
-    if (i == null) continue;
-    if (r.track === "coding" && r.status === "solved") out[i].leetcode += 1;
-    else if (r.track === "system_design") out[i].systemDesign += 1;
   }
   return out;
 }

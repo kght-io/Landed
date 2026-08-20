@@ -7,7 +7,7 @@ import { usePersistentState } from "@/hooks/usePersistentState";
 import AgentsLive from "@/components/AgentsLive";
 import AgentMonitor, { type MonitorJob } from "@/components/agents/AgentMonitor";
 import Playbook from "@/components/agents/Playbook";
-import TabBar from "@/components/prep/TabBar";
+import TabBar from "@/components/TabBar";
 import McpDocsPanel from "@/components/mcp/McpDocsPanel";
 import { AUTO_WORK_IGNORED_KEY, AUTO_WORK_KEY } from "@/components/AutoWorkController";
 import { personaFor } from "@landed/shared/agents/personas";

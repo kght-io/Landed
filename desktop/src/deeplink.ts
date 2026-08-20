@@ -25,7 +25,7 @@ export type DeepLink =
 // The app's slug is a PATH, not a single name: tailoring writes versioned folders like
 // "acme-senior-123/v2" (see backend/src/config.ts resolveResume, which allows any slug that stays
 // inside the resume dir). So the rule is per SEGMENT — each one shaped like the slugs
-// backend/src/db/prep.ts:311 generates — with no empty segments, no traversal, and no leading
+// backend/src/db/prep.ts's companySlug generates — with no empty segments, no traversal, and no leading
 // slash. Narrow enough that containment falls out of the charset instead of needing a realpath.
 const SLUG = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
 const isSlug = (s: string): boolean => SLUG.test(s);

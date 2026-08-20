@@ -64,7 +64,7 @@ function pushFrame(type: string, frame: Frame): void {
 
 // The queue types this app drains. Each gets its own loop, matching the queue's own model of one
 // process per type; two types can run at once, the same type never does.
-const DRAIN_TYPES = ["fit", "tailoring", "prep-research", "interview-brief", "inbox-sync"];
+const DRAIN_TYPES = ["fit", "tailoring", "interview-brief", "inbox-sync"];
 
 // Long-poll the app for claimable work. The 25s hold is the queue's, not ours — there is no
 // interval here to tune, and an empty result simply means "ask again".

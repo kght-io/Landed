@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, Send, Loader2, User, Trash2, PanelRightClose, FileText } from "lucide-react";
+import { Bot, Send, Loader2, User, Trash2, PanelRightClose, FileText, Maximize2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useHydrated } from "@/hooks/useHydrated";
 
 // A full-height chat with the locked-down interview-prep agent for one company (runs on your
 // subscription; read-only file access to that company's prep folder, no other tools). Designed to
@@ -21,6 +22,10 @@ export default function PrepChat({
   placeholder = "Ask Claude Code…  (Enter to send, Shift+Enter for newline)",
   intro,
   onCollapse,
+  fullscreen,
+  openUrl,
+  heading,
+  subheading,
 }: {
   storageId: string; // stable per company — keys the persisted history + session
   slug: string; // company folder the server scopes this chat to (interview-prep/<slug>)
@@ -28,6 +33,10 @@ export default function PrepChat({
   placeholder?: string;
   intro?: string; // empty-state hint
   onCollapse?: () => void; // show a collapse control in the header
+  fullscreen?: boolean; // fill-the-window layout (the standalone page) vs the docked pane
+  openUrl?: string; // show an "open in its own tab" control pointing at this chat's page
+  heading?: string; // the company — the headline full screen, where the drawer isn't there to say it
+  subheading?: string; // the role under it
 }) {
   const MSGS_KEY = `landed.prepchat.${storageId}.msgs`;
   const SID_KEY = `landed.prepchat.${storageId}.sid`;
@@ -41,10 +50,22 @@ export default function PrepChat({
   const [sid, setSid] = useState<string | null>(() => (typeof window === "undefined" ? null : localStorage.getItem(SID_KEY)));
   const [ctxFiles, setCtxFiles] = useState<CtxFile[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // `msgs` and `sid` start from localStorage, which the server can't see. This chat is server-rendered
+  // on its own page (in the drawer it never was), so the stored history is withheld for exactly one
+  // render — the hydration one — and appears on the commit after it. Without that, React finds an
+  // empty log in the HTML and a full one in the client tree, and throws the whole subtree away.
+  const hydrated = useHydrated();
+  const shown = hydrated ? msgs : [];
 
+  // Pin to the newest message. `ctxFiles` is a dependency for a layout reason, not a data one: the
+  // context-files strip renders above the log a beat after mount (its fetch resolves), growing the
+  // content and leaving an open-on-mount scroll short of the end.
+  //
+  // Switching to the Chat tab REMOUNTS this component and the history comes back from localStorage,
+  // so without the mount pass you land at the top of an old conversation and have to scroll down.
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [msgs, busy]);
+  }, [msgs, busy, ctxFiles, fullscreen]); // fullscreen: the pane resizes, so the pin has to be redone
   // The research files the coach reads from this company's folder — shown so the context is visible,
   // like an agent project's file list. Refetched after each turn (a turn can dump/refresh them).
   useEffect(() => {
@@ -119,16 +140,47 @@ export default function PrepChat({
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
+  // Full screen isn't the docked pane stretched: the rules that make a 420px column readable (tight
+  // padding, edge-to-edge rows) make a 1440px one worse. So the borders still span the window, while
+  // the CONTENT of every row sits in one centred column with room to breathe around it.
+  const col = fullscreen ? "mx-auto w-full max-w-4xl" : "";
+  const rowPad = fullscreen ? "px-8" : "px-4";
+
   return (
     <div className="flex h-full flex-col bg-zinc-950/40">
-      <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800/60 px-4 py-2.5">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-500/15 ring-1 ring-sky-500/30"><Bot size={12} className="text-sky-300" /></span>
-        <h3 className="text-[13px] font-semibold text-zinc-100">Claude Code</h3>
-        <span className="ml-auto text-[11px] text-zinc-500">{sid ? "session live" : "new session"}</span>
-        {msgs.length > 0 && (
+      <div className={`shrink-0 border-b border-zinc-800/60 ${rowPad} ${fullscreen ? "py-4" : "py-2.5"}`}>
+      <div className={`flex items-center gap-3 ${col}`}>
+        <span className={`flex items-center justify-center rounded-full bg-sky-500/15 ring-1 ring-sky-500/30 ${fullscreen ? "h-9 w-9" : "h-6 w-6"}`}>
+          <Bot size={fullscreen ? 17 : 12} className="text-sky-300" />
+        </span>
+        {/* On its own page the COMPANY is the headline — nothing else on screen says who this is for,
+            and a tab full of chats is told apart by the name, not by "Claude Code" repeated. */}
+        {fullscreen && heading ? (
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-[17px] font-bold tracking-tight text-zinc-100" title={heading}>{heading}</h1>
+            <p className="truncate text-[13px] text-zinc-400">
+              {subheading ? `${subheading} · ` : ""}interview prep coach
+            </p>
+          </div>
+        ) : (
+          <h3 className="shrink-0 text-[13px] font-semibold text-zinc-100">Claude Code</h3>
+        )}
+        <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{hydrated && sid ? "session live" : "new session"}</span>
+        {shown.length > 0 && (
           <button onClick={reset} title="Clear this chat" className="rounded p-1 text-zinc-600 transition hover:bg-zinc-800 hover:text-rose-300">
             <Trash2 size={12} />
           </button>
+        )}
+        {openUrl && (
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open this chat in its own tab"
+            className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+          >
+            <Maximize2 size={14} />
+          </a>
         )}
         {onCollapse && (
           <button onClick={onCollapse} title="Collapse chat" className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200">
@@ -136,11 +188,13 @@ export default function PrepChat({
           </button>
         )}
       </div>
+      </div>
 
       {/* Context files — the research .md outputs the coach reads from this company's folder. Shown
           so it's transparent what the assistant is working from, like an agent project's file list. */}
       {ctxFiles.length > 0 && (
-        <div className="shrink-0 border-b border-zinc-800/60 bg-zinc-950/60 px-4 py-2">
+        <div className={`shrink-0 border-b border-zinc-800/60 bg-zinc-950/60 py-2 ${rowPad}`}>
+          <div className={col}>
           <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">Context · reading from this folder</p>
           <ul className="flex flex-wrap gap-1.5">
             {ctxFiles.map((f) => (
@@ -154,14 +208,16 @@ export default function PrepChat({
               </li>
             ))}
           </ul>
+          </div>
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {msgs.length === 0 && (
+      <div ref={scrollRef} className={`flex-1 overflow-y-auto ${rowPad} ${fullscreen ? "py-8" : "py-3"}`}>
+        <div className={`${col} ${fullscreen ? "space-y-6" : "space-y-3"}`}>
+        {shown.length === 0 && (
           <p className="py-6 text-center text-[12px] leading-relaxed text-zinc-500">{intro ?? "Your interview-prep coach for this company — it reads this company's research files and helps you prep."}</p>
         )}
-        {msgs.map((m, i) => {
+        {shown.map((m, i) => {
           if (m.role === "note")
             return <p key={i} className="px-2 py-1 text-center text-[11px] leading-relaxed text-zinc-600">{m.text}</p>;
 
@@ -208,9 +264,11 @@ export default function PrepChat({
             <Loader2 size={13} className="animate-spin" /> thinking…
           </div>
         )}
+        </div>
       </div>
 
-      <div className="flex shrink-0 items-end gap-2 border-t border-zinc-800/60 px-3 py-2.5">
+      <div className={`shrink-0 border-t border-zinc-800/60 ${fullscreen ? `${rowPad} py-5` : "px-3 py-2.5"}`}>
+      <div className={`flex items-end gap-2 ${col}`}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -226,6 +284,7 @@ export default function PrepChat({
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
         </button>
+      </div>
       </div>
     </div>
   );

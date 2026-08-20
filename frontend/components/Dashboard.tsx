@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Briefcase, CalendarDays, GitBranchPlus, Bot, GraduationCap } from "lucide-react";
+import { Loader2, Briefcase, CalendarDays, GitBranchPlus, Bot } from "lucide-react";
 import { ago } from "@landed/shared/format/time";
-import type { DashboardStats, Tone, SeriesPoint, PrepPoint } from "@landed/backend/db/dashboard";
+import type { DashboardStats, Tone, SeriesPoint } from "@landed/backend/db/dashboard";
 
 const TONE_BAR: Record<Tone, string> = {
   good: "bg-emerald-500", accent: "bg-sky-500", critical: "bg-rose-500", warning: "bg-amber-500", neutral: "bg-zinc-500",
@@ -24,7 +24,7 @@ export default function Dashboard() {
     <div className="flex h-full flex-col text-zinc-100">
       <header className="border-b border-zinc-800/80 bg-zinc-950/80 px-6 py-3.5 backdrop-blur">
         <h1 className="text-[15px] font-semibold tracking-tight text-zinc-100">Dashboard</h1>
-        <p className="mt-0.5 text-[13px] text-zinc-500">Your job hunt at a glance — applications, prep, and momentum.</p>
+        <p className="mt-0.5 text-[13px] text-zinc-500">Your job hunt at a glance — applications, pipeline, and momentum.</p>
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -45,10 +45,9 @@ export default function Dashboard() {
                 <StatTile label="Watchlist" value={d.kpis.watchlist} sub="companies" />
               </div>
 
-              {/* The three things you check daily — momentum on applications, on prep, and what just happened. */}
-              <div className="grid gap-6 lg:grid-cols-3">
+              {/* The two things you check daily — momentum on applications, and what just happened. */}
+              <div className="grid gap-6 lg:grid-cols-2">
                 <ApplicationsCard applications={d.applications} />
-                <PrepCard prep={d.prep} totals={d.prepTotals} />
                 <RecentCard recent={d.recent} />
               </div>
 
@@ -134,23 +133,6 @@ function ApplicationsCard({ applications }: { applications: DashboardStats["appl
   );
 }
 
-function PrepCard({ prep, totals }: { prep: DashboardStats["prep"]; totals: DashboardStats["prepTotals"] }) {
-  const [range, setRange] = useState<Range>("week");
-  const data = prep[range];
-  const lc = data.reduce((s, p) => s + p.leetcode, 0);
-  const sd = data.reduce((s, p) => s + p.systemDesign, 0);
-  return (
-    <Card title="Prep" icon={<GraduationCap size={14} className="text-emerald-300" />} action={<RangeToggle value={range} onChange={setRange} />}>
-      <div className="mb-2 flex items-center gap-4 text-[12px]">
-        <LegendDot color="bg-emerald-400" label="LeetCode solved" value={lc} />
-        <LegendDot color="bg-violet-400" label="System design" value={sd} />
-      </div>
-      <PrepLines data={data} />
-      <p className="mt-2 text-[11px] text-zinc-600">{totals.attempts} total attempts · {totals.companies} companies researched</p>
-    </Card>
-  );
-}
-
 function RecentCard({ recent }: { recent: DashboardStats["recent"] }) {
   return (
     <Card title="Recent activity">
@@ -168,16 +150,6 @@ function RecentCard({ recent }: { recent: DashboardStats["recent"] }) {
         </ul>
       )}
     </Card>
-  );
-}
-
-function LegendDot({ color, label, value }: { color: string; label: string; value: number }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
-      <span className="text-zinc-400">{label}</span>
-      <span className="tabular-nums font-semibold text-zinc-100">{value}</span>
-    </span>
   );
 }
 
@@ -292,25 +264,6 @@ function BarSeries({ data, unit }: { data: SeriesPoint[]; unit: string }) {
           />
         ))}
       </div>
-    </ChartFrame>
-  );
-}
-
-// Two-line time series (leetcode solved + system design practiced). An SVG with a stretched viewBox
-// (preserveAspectRatio none) so it fills the card width; strokes stay crisp via non-scaling-stroke.
-function PrepLines({ data }: { data: PrepPoint[] }) {
-  const { top, ticks } = axisTicks(Math.max(1, ...data.flatMap((p) => [p.leetcode, p.systemDesign])));
-  const n = data.length;
-  const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * 100);
-  const y = (v: number) => 100 - (v / top) * 100;
-  const path = (key: "leetcode" | "systemDesign") =>
-    data.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(2)},${y(p[key]).toFixed(2)}`).join(" ");
-  return (
-    <ChartFrame top={top} ticks={ticks} xStart={data[0]?.label} xEnd={data[data.length - 1]?.label}>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" role="img" aria-label="Prep problems over time">
-        <path d={path("systemDesign")} fill="none" stroke="#a78bfa" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-        <path d={path("leetcode")} fill="none" stroke="#34d399" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-      </svg>
     </ChartFrame>
   );
 }

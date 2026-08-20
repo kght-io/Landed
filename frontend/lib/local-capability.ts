@@ -35,7 +35,6 @@ export type ResumeDiffResult =
 export type PrepAssets = {
   slug: string;
   emails: { at: string | null; attachments: { name: string; bytes: number }[] };
-  questions: { researchedAt: string | null };
   transcripts: { name: string; bytes: number; at: string }[];
   context: { at: string | null };
 };

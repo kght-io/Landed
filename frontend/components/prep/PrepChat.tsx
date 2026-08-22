@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Bot, Send, Loader2, User, Trash2, PanelRightClose, FileText, Maximize2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useHydrated } from "@/hooks/useHydrated";
+import { chatState, sendTurn, resetChat, subscribeChat, EMPTY } from "@landed/shared/prep/chat-store";
 
 // A full-height chat with the locked-down interview-prep agent for one company (runs on your
 // subscription; read-only file access to that company's prep folder, no other tools). Designed to
@@ -12,7 +12,6 @@ import { useHydrated } from "@/hooks/useHydrated";
 // scopes the server turn to the company folder; `context` is the system prompt appended on the first
 // turn. The header lists the folder's research .md files so you can see what the coach is reading.
 // `note` = a system line (e.g. "session refreshed") rendered muted + centered, not a chat bubble.
-type Msg = { role: "user" | "assistant" | "note"; text: string; error?: boolean };
 type CtxFile = { name: string; size: number; mtime: string };
 
 export default function PrepChat({
@@ -38,34 +37,24 @@ export default function PrepChat({
   heading?: string; // the company — the headline full screen, where the drawer isn't there to say it
   subheading?: string; // the role under it
 }) {
-  const MSGS_KEY = `landed.prepchat.${storageId}.msgs`;
-  const SID_KEY = `landed.prepchat.${storageId}.sid`;
-
-  const [msgs, setMsgs] = useState<Msg[]>(() => {
-    if (typeof window === "undefined") return [];
-    try { const a = JSON.parse(localStorage.getItem(MSGS_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; }
-  });
+  // The conversation lives in the store, not here: this component is unmounted every time the drawer
+  // switches tabs, and a turn must outlive that (see @landed/shared/prep/chat-store). EMPTY is the
+  // server/hydration snapshot — the browser's stored history can't be known server-side, so it lands
+  // on the commit after hydration instead of mismatching the HTML.
+  const subscribe = useCallback((cb: () => void) => subscribeChat(storageId, cb), [storageId]);
+  const { msgs, sid, busy } = useSyncExternalStore(subscribe, () => chatState(storageId), () => EMPTY);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [sid, setSid] = useState<string | null>(() => (typeof window === "undefined" ? null : localStorage.getItem(SID_KEY)));
   const [ctxFiles, setCtxFiles] = useState<CtxFile[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // `msgs` and `sid` start from localStorage, which the server can't see. This chat is server-rendered
-  // on its own page (in the drawer it never was), so the stored history is withheld for exactly one
-  // render — the hydration one — and appears on the commit after it. Without that, React finds an
-  // empty log in the HTML and a full one in the client tree, and throws the whole subtree away.
-  const hydrated = useHydrated();
-  const shown = hydrated ? msgs : [];
 
   // Pin to the newest message. `ctxFiles` is a dependency for a layout reason, not a data one: the
   // context-files strip renders above the log a beat after mount (its fetch resolves), growing the
-  // content and leaving an open-on-mount scroll short of the end.
-  //
-  // Switching to the Chat tab REMOUNTS this component and the history comes back from localStorage,
-  // so without the mount pass you land at the top of an old conversation and have to scroll down.
+  // content and leaving an open-on-mount scroll short of the end. `fullscreen` resizes the pane, and
+  // `msgs` covers a turn that finished while this component was unmounted.
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [msgs, busy, ctxFiles, fullscreen]); // fullscreen: the pane resizes, so the pin has to be redone
+  }, [msgs, busy, ctxFiles, fullscreen]);
+
   // The research files the coach reads from this company's folder — shown so the context is visible,
   // like an agent project's file list. Refetched after each turn (a turn can dump/refresh them).
   useEffect(() => {
@@ -76,12 +65,8 @@ export default function PrepChat({
       .catch(() => { /* non-critical — just hides the list */ });
     return () => { alive = false; };
   }, [slug, busy]);
-  useEffect(() => {
-    try { localStorage.setItem(MSGS_KEY, JSON.stringify(msgs.slice(-200))); } catch { /* quota — skip */ }
-  }, [msgs, MSGS_KEY]);
-  useEffect(() => { if (sid) localStorage.setItem(SID_KEY, sid); }, [sid, SID_KEY]);
 
-  const send = async () => {
+  const send = () => {
     const text = input.trim();
     if (!text || busy) return;
     pendo.track("prep_chat_message_sent", {
@@ -90,51 +75,19 @@ export default function PrepChat({
       is_first_message: msgs.length === 0,
       session_active: !!sid,
     });
-    setMsgs((m) => [...m, { role: "user", text }]);
-    setInput("");
-    setBusy(true);
-    const conversationId = sid || storageId;
     window.pendo?.trackAgent("prompt", {
       agentId: "rSt-ZD_8KrkEU2tFKqlaoIpAhAw",
-      conversationId,
+      conversationId: sid || storageId,
       messageId: crypto.randomUUID(),
       content: text,
     });
-    try {
-      const r = await fetch("/api/agents/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        // Always send scope + slug: `context` seeds the first turn AND any background recovery (if the
-        // session died, the server re-seeds a fresh one); `slug` keeps the turn locked to this
-        // company's prep folder (read-only, no other tools).
-        body: JSON.stringify({ message: text, sessionId: sid, context, slug }),
-      });
-      const d = await r.json();
-      if (d.sessionId) setSid(d.sessionId);
-      const replyText = d.reply || d.error || "(no reply)";
-      window.pendo?.trackAgent("agent_response", {
-        agentId: "rSt-ZD_8KrkEU2tFKqlaoIpAhAw",
-        conversationId,
-        messageId: crypto.randomUUID(),
-        content: replyText,
-      });
-      setMsgs((m) => [
-        ...m,
-        ...(d.recovered ? [{ role: "note" as const, text: "↻ The previous session had expired — refreshed it automatically. Your history above is kept here." }] : []),
-        { role: "assistant" as const, text: replyText, error: !!d.error || !!d.isError },
-      ]);
-    } catch {
-      setMsgs((m) => [...m, { role: "assistant", text: "Couldn't reach Claude Code.", error: true }]);
-    } finally {
-      setBusy(false);
-    }
+    setInput("");
+    // Deliberately not awaited: the turn belongs to the store and completes on its own, so this
+    // component unmounting (a tab switch) can't cancel it.
+    void sendTurn(storageId, { message: text, context, slug });
   };
 
-  const reset = () => {
-    setMsgs([]);
-    setSid(null);
-    try { localStorage.removeItem(MSGS_KEY); localStorage.removeItem(SID_KEY); } catch { /* ignore */ }
-  };
+  const reset = () => resetChat(storageId);
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
@@ -165,8 +118,8 @@ export default function PrepChat({
         ) : (
           <h3 className="shrink-0 text-[13px] font-semibold text-zinc-100">Claude Code</h3>
         )}
-        <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{hydrated && sid ? "session live" : "new session"}</span>
-        {shown.length > 0 && (
+        <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{sid ? "session live" : "new session"}</span>
+        {msgs.length > 0 && (
           <button onClick={reset} title="Clear this chat" className="rounded p-1 text-zinc-600 transition hover:bg-zinc-800 hover:text-rose-300">
             <Trash2 size={12} />
           </button>
@@ -214,10 +167,10 @@ export default function PrepChat({
 
       <div ref={scrollRef} className={`flex-1 overflow-y-auto ${rowPad} ${fullscreen ? "py-8" : "py-3"}`}>
         <div className={`${col} ${fullscreen ? "space-y-6" : "space-y-3"}`}>
-        {shown.length === 0 && (
+        {msgs.length === 0 && (
           <p className="py-6 text-center text-[12px] leading-relaxed text-zinc-500">{intro ?? "Your interview-prep coach for this company — it reads this company's research files and helps you prep."}</p>
         )}
-        {shown.map((m, i) => {
+        {msgs.map((m, i) => {
           if (m.role === "note")
             return <p key={i} className="px-2 py-1 text-center text-[11px] leading-relaxed text-zinc-600">{m.text}</p>;
 

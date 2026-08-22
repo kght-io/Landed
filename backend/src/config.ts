@@ -1,5 +1,12 @@
 import path from "node:path";
 import { repoPath } from "./paths";
+import { loadEnvFile } from "./env";
+
+// Load the REPO-ROOT .env before anything below reads process.env. Next's own dotenv loader is
+// cwd-relative, and `npm run dev` puts cwd at frontend/ — so without this the repo-root .env is
+// never read and every setting here silently falls back to its default. Anchored on REPO_ROOT so it
+// works from any cwd; never overrides a var the process already has (see ./env).
+loadEnvFile(repoPath(".env"));
 
 // The Claude the agent asset folder: the app reads/writes here, the agent works here.
 // Set ASSET_ROOT in your .env to point at your own folder (see .env.example).
@@ -37,6 +44,20 @@ export const PATHS = {
   // permanent tailored-resume folder after Applied
   tailoredResume: (slug: string) => path.join(ASSET_ROOT, "resume", slug),
 };
+
+// The on-disk anchors the agent needs to run a job, handed over via getContext.
+//
+// Without these the agent has to DISCOVER where the asset root is — a measured tailoring run spent
+// two requests grepping this very file plus .env for ASSET_ROOT, then hard-prefixed it onto every
+// later command. The playbooks used to write `$ASSET_ROOT/...`, which only works if that variable
+// happens to be exported into the agent's shell; it is not (claudeEnv forwards the server's env,
+// and the launchd server is spawned without it). Hand over resolved absolute paths instead of a
+// variable the agent has to hope is set.
+export const agentPaths = () => ({
+  assetRoot: ASSET_ROOT,
+  baseResume: PATHS.baseResume("docx"),
+  resumeDir: PATHS.resumeDir(),
+});
 
 // Resolve a tailored-resume folder safely inside the resume dir. Null if the slug escapes it.
 export function resolveResume(slug: string): string | null {

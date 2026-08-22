@@ -5,6 +5,7 @@ import { logEvent, getPosting } from "../../db/queries";
 import { slugFor } from "../../config";
 import { parseRedoLog, nextVersion, renderThread, hasPendingRedo, pendingRedoNote, pendingUserIndex } from "@landed/shared/jobs/redolog";
 import { createJob, now, dropPendingRedoNote } from "../queue";
+import { fitForParams } from "../fit-params";
 import { enqueueFitRedo, findFitJd } from "./fit";
 import type { Posting, RedoPhase, RedoTurn } from "@landed/shared/types";
 
@@ -78,6 +79,7 @@ export function enqueueTailoring(p: Posting, opts?: { bumpQueuedAt?: boolean }):
     ?? db.select({ jd: postings.jd }).from(postings).where(eq(postings.id, Number(p.id))).get()?.jd
     ?? undefined;
   const redoNote = pendingRedoNote(p.redoLog ?? [], "tailor"); // empty for the first tailor (v1)
+  const fit = fitForParams(p); // undefined when never scored — the agent then steers off the JD alone
   createJob({
     id: `tailoring-app-${p.id}`,
     type: "tailoring",
@@ -85,7 +87,7 @@ export function enqueueTailoring(p: Posting, opts?: { bumpQueuedAt?: boolean }):
     task: tailoringTask(p, version, targetSlug),
     // redoNote rides on the job so the live UI (which reads the queue, not the posting) can show the
     // "Queued for redo" tag + pre-fill the editable note — present only when this is a redo.
-    params: { postings: [{ id: Number(p.id), company: p.company, role: p.role, url: p.url, slug: targetSlug, version, ...(jd ? { jd } : {}) }], ...(redoNote ? { redoNote } : {}) },
+    params: { postings: [{ id: Number(p.id), company: p.company, role: p.role, url: p.url, slug: targetSlug, version, ...(jd ? { jd } : {}), ...(fit ? { fit } : {}) }], ...(redoNote ? { redoNote } : {}) },
     bumpQueuedAt: opts?.bumpQueuedAt,
   });
 }

@@ -1,3 +1,4 @@
+import { agentPaths } from "@landed/backend/config";
 import { getConfig } from "@landed/backend/db/config-store";
 import { getLevelingRef } from "@landed/backend/db/profile";
 import { agentProfile } from "@landed/backend/db/prompts";
@@ -10,12 +11,15 @@ export const dynamic = "force-dynamic";
 //     the source of truth for the scan's second pass and fit's leveling
 //   - levelingRef: the reference ladder companies are normalized against (anchor + target rung), so
 //     The agent normalizes collected levels.fyi ladders to the same scale the app draws against
+//   - paths: resolved absolute asset paths (asset root, base résumé, resume dir), so a job that
+//     touches disk never has to grep the source for ASSET_ROOT or rely on a shell var that isn't set
 export async function GET() {
   try {
     return Response.json({
       inboxLastSynced: getConfig("inbox_last_synced") ?? null,
       profile: agentProfile(),
       levelingRef: getLevelingRef(),
+      paths: agentPaths(),
     });
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 500 });

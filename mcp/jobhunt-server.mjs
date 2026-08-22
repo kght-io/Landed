@@ -51,13 +51,45 @@ const log = (s) => process.stderr.write(`[jobhunt] ${s}\n`);
 // Thread headers ride on every HTTP call so the app can attribute claims + reads to this chat.
 const threadHeaders = () => ({ "x-jobhunt-thread": THREAD_ID, "x-jobhunt-thread-label": THREAD_LABEL });
 
+// CLOUDFLARE ACCESS. When JOBHUNT_URL points at the deployed app, every request first meets Access,
+// which authenticates BEFORE the app sees it. A browser gets a login page; this process cannot log
+// in, so it presents a SERVICE TOKEN instead — the machine half of the same gate.
+//
+// Unset locally, where JOBHUNT_URL is localhost and there is no gate to pass. Sending them anyway
+// would be harmless; omitting them keeps a local run from looking like it needs credentials it does
+// not have.
+//
+// Access strips these before forwarding, so the app never sees them and needs no code to under-
+// stand them. That is the point of gating at the edge: authentication is not the app's problem.
+const ACCESS_ID = process.env.CF_ACCESS_CLIENT_ID;
+const ACCESS_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
+const accessHeaders = () =>
+  ACCESS_ID && ACCESS_SECRET
+    ? { "CF-Access-Client-Id": ACCESS_ID, "CF-Access-Client-Secret": ACCESS_SECRET }
+    : {};
+
+// Access does not answer 401 — it answers 302 to a login page, and fetch follows it, so a blocked
+// call arrives as a perfectly successful 200 of HTML. Without this it surfaces as "returned
+// non-JSON: <!DOCTYPE html…", which reads like an app bug and sends you debugging the wrong layer.
+// Name it for what it is, and say which of the two causes applies.
+function accessBlocked(res, body) {
+  const viaAccess = res.url?.includes("cloudflareaccess.com") || /cloudflareaccess\.com/.test(body.slice(0, 2000));
+  if (!viaAccess) return null;
+  return ACCESS_ID && ACCESS_SECRET
+    ? `Cloudflare Access REJECTED the service token reaching ${BASE_URL}. The token exists but is not ` +
+      `authorized: check the Access application has a policy with Action "Service Auth" that includes ` +
+      `this token (a browser-only Allow policy does not admit machines).`
+    : `Cloudflare Access blocked this call to ${BASE_URL} and no service token was supplied. Set ` +
+      `CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET in the MCP config env for this server.`;
+}
+
 // Fire-and-forget telemetry to the app's thread endpoints. NEVER throws and NEVER writes to stdout
 // (reserved for protocol frames) — observability must not perturb the tool flow or the JSON-RPC stream.
 function fireTelemetry(pathWithQuery, payload) {
   try {
     fetch(`${BASE_URL}${pathWithQuery}`, {
       method: "POST",
-      headers: { "content-type": "application/json", ...threadHeaders() },
+      headers: { "content-type": "application/json", ...threadHeaders(), ...accessHeaders() },
       body: JSON.stringify(payload ?? {}),
     }).catch(() => {});
   } catch {
@@ -108,7 +140,7 @@ async function api(pathWithQuery) {
   const url = `${BASE_URL}${pathWithQuery}`;
   let res;
   try {
-    res = await fetch(url, { headers: { accept: "application/json", ...threadHeaders() } });
+    res = await fetch(url, { headers: { accept: "application/json", ...threadHeaders(), ...accessHeaders() } });
   } catch (e) {
     throw new Error(
       `cannot reach the job-hunt app at ${BASE_URL} (${e?.message ?? e}). ` +
@@ -120,6 +152,8 @@ async function api(pathWithQuery) {
   try {
     return JSON.parse(body);
   } catch {
+    const gated = accessBlocked(res, body);
+    if (gated) throw new Error(gated);
     throw new Error(`GET ${pathWithQuery} returned non-JSON: ${body.slice(0, 200)}`);
   }
 }
@@ -134,7 +168,7 @@ async function apiSend(method, pathWithQuery, payload) {
       // Every MCP write is the agent's — tag it so the app attributes the change-log event to the agent,
       // not the human default (You). Routes that don't read this header simply ignore it. The
       // thread headers let the app group claims under this chat (see THREAD_ID).
-      headers: { "content-type": "application/json", accept: "application/json", "x-jobhunt-actor": "CoWork", ...threadHeaders() },
+      headers: { "content-type": "application/json", accept: "application/json", "x-jobhunt-actor": "CoWork", ...threadHeaders(), ...accessHeaders() },
       body: JSON.stringify(payload ?? {}),
     });
   } catch (e) {
@@ -148,6 +182,8 @@ async function apiSend(method, pathWithQuery, payload) {
   try {
     return JSON.parse(body);
   } catch {
+    const gated = accessBlocked(res, body);
+    if (gated) throw new Error(gated);
     throw new Error(`${method} ${pathWithQuery} returned non-JSON: ${body.slice(0, 200)}`);
   }
 }

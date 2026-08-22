@@ -2,9 +2,11 @@ import { and, eq, ne, inArray, or, lt, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import { jobs, postings, threads } from "../db/schema";
 import { getConfig, setConfig, deleteConfig } from "../db/config-store";
-import { logEvent } from "../db/queries";
+import { logEvent, getPosting } from "../db/queries";
 import { jobDef } from "./registry";
 import { stampClaimedPrompt } from "./prompt-stamp";
+import { paramsWithFit } from "./fit-params";
+import { readLivePid } from "../agents/run-log";
 import { parseRedoLog, pendingUserIndex } from "@landed/shared/jobs/redolog";
 import { postingIdIn } from "@landed/shared/jobs/params";
 import { CLAIM_LEASE_MS, isStaleClaimAt } from "@landed/shared/jobs/lease";
@@ -184,7 +186,18 @@ function getJobView(id: string): JobView | null {
 // For each abandoned job: if it's been claimed ≥ CLAIM_MAX_ATTEMPTS with no result it's poison →
 // dead-letter to `failed` (shows in "needs attention"); otherwise it still has budget → back to
 // `queued` NOW so the next agent reclaims it in minutes, not an hour. Returns how many it actioned.
-export function reapStuckJobs(): number {
+export function reapStuckJobs(opts?: { isRunLive?: (type: string) => boolean }): number {
+  // The heartbeat INFERS death from silence; a live run process is direct evidence of life, so it
+  // wins. A headless drain run writes data/agent-runs/<type>.pid, and readLivePid probes whether
+  // that process still exists — the observation the heartbeat was invented to stand in for.
+  // Injectable so tests don't have to write pid files into the real data/agent-runs/.
+  const isRunLive = opts?.isRunLive ?? ((type: string) => readLivePid(type) !== null);
+  const liveByType = new Map<string, boolean>(); // one probe per type, not per job
+  const runLive = (type: string): boolean => {
+    if (!liveByType.has(type)) liveByType.set(type, isRunLive(type));
+    return liveByType.get(type)!;
+  };
+
   const beatCut = new Date(Date.now() - HEARTBEAT_SILENCE_MS).toISOString();
   const lastSeen = new Map(db.select({ id: threads.id, seen: threads.lastSeenAt }).from(threads).all().map((t) => [t.id, t.seen]));
   let actioned = 0;
@@ -193,6 +206,11 @@ export function reapStuckJobs(): number {
     const seen = j.threadId ? lastSeen.get(j.threadId) ?? null : null;
     const threadSilent = !!j.threadId && (!seen || seen < beatCut); // the agent (thread) went quiet
     if (!leaseExpired && !threadSilent) continue; // still actively worked — leave it
+    // Silent but its run process is alive: a tailoring agent goes 20+ minutes between MCP calls
+    // while it writes edits and builds the .docx, and reaping there yanks the claim out from under a
+    // working agent — its submit then 400s and it re-does the whole hand-back. The LEASE still
+    // applies (checked above and re-checked here), so a wedged process can't hold a job forever.
+    if (threadSilent && !leaseExpired && runLive(j.type)) continue;
     if ((j.attempts ?? 0) >= CLAIM_MAX_ATTEMPTS) {
       const reason = j.error ?? `stuck: claimed ${j.attempts}× with no result (auto-failed after ${CLAIM_MAX_ATTEMPTS} attempts)`;
       db.update(jobs).set(deadLettered(reason)).where(eq(jobs.id, j.id)).run();
@@ -330,6 +348,56 @@ export function activeQueueType(): string | null {
   return [...open].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0].type;
 }
 
+// ── fit ⇄ tailoring ordering ──
+// A tailoring job's params are a SNAPSHOT of the posting at enqueue time, and a fit can land after
+// that. Observed in production: fit queued 15:51:00, tailoring queued 15:51:06, tailoring claimed
+// 15:51:12, fit ingested 15:52:19 — the tailor worked blind for 67s on a posting whose assessment
+// was being written next to it. Two halves fix it, both here in the claim path because claim time
+// is the latest moment we control.
+
+// How long a tailoring job will wait for a fit that's still being scored. Bounded on purpose: a
+// drain run works ONE type (the runner's prompt says so), so a queued fit job nobody drains would
+// park its tailoring job forever if the gate had no deadline. A fit run takes ~1-2 minutes; past
+// this the tailor stops waiting and works off the JD alone, which is the documented no-fit path.
+const FIT_WAIT_MS = 10 * 60 * 1000;
+
+// Half 1 — is a fit job for this posting in flight AND still worth waiting for? `failed` (dead-
+// lettered) never lands, an expired lease is an abandoned run rather than live work, and anything
+// past FIT_WAIT_MS has stopped being "about to finish". Any of those → don't wait.
+function hasLiveFitJob(postingId: number, nowMs = Date.now()): boolean {
+  return db
+    .select({ status: jobs.status, createdAt: jobs.createdAt, claimedAt: jobs.claimedAt, params: jobs.params })
+    .from(jobs)
+    // `ingested`/`failed` fit jobs can never land, and a posting accrues them for the whole life of
+    // the app — narrow in SQL so this stays a lookup rather than a scan of the ledger. The lease is
+    // NOT expressible here (isClaimable() is the claimability rule, and a wip row past its lease is
+    // claimable but not live), so `wip` comes back and the staleness check below decides.
+    .where(and(eq(jobs.type, "fit"), inArray(jobs.status, ["queued", "wip"])))
+    .all()
+    .some((f) => {
+      if (postingIdOf(f.params) !== postingId) return false;
+      if (isStaleClaim(f.status, f.claimedAt)) return false; // an abandoned run, not live work
+      const started = Date.parse(f.claimedAt ?? f.createdAt);
+      return Number.isFinite(started) && nowMs - started < FIT_WAIT_MS;
+    });
+}
+
+// Half 2 — re-read the fit when the job is handed over, so one that landed after enqueue still
+// reaches the agent. Persisted rather than only decorating the returned view: the agent, the UI, and
+// any later read of the row must agree on what this run was given. No-ops for every other job type,
+// and for a posting that is still unscored (the key stays absent — see fit-params.ts).
+function refreshFitParams(id: string): void {
+  const row = db.select({ type: jobs.type, params: jobs.params }).from(jobs).where(eq(jobs.id, id)).get();
+  if (!row || row.type !== "tailoring") return;
+  const params = parseParams(row.params);
+  const postingId = postingIdIn(params);
+  if (postingId == null) return;
+  const posting = getPosting(postingId);
+  if (!posting) return;
+  const next = paramsWithFit(params, posting);
+  if (next) db.update(jobs).set({ params: JSON.stringify(next) }).where(eq(jobs.id, id)).run();
+}
+
 // Low-level atomic take — the shared primitive for both the explicit claimJob and the claimNext loop.
 // The UPDATE only matches a row still `queued` (or one whose lease expired, see CLAIM_LEASE_MS), so
 // concurrent claims race on the DB and exactly one wins (changes === 1). Returns the claimed job for
@@ -357,6 +425,7 @@ function tryClaim(id: string, by?: string | null, threadId?: string | null): Job
       .run();
     if (released.changes) logEvent({ entity: "job", action: "update", source: "cowork", actor: "CoWork", summary: `released ${released.changes} stale wip job(s) — agent moved on to ${id}` });
   }
+  refreshFitParams(id);
   const job = getJobView(id);
   // Stamp the judgment-prompt version this run will read (fit / tailoring only). Kept OUT of the
   // atomic take above — that statement is the concurrency primitive and stays a single conditional
@@ -391,12 +460,20 @@ export function claimNext(by?: string | null, type?: string | null, threadId?: s
   const target = type ?? activeQueueType();
   if (!target) return null;
   const claimable = db
-    .select({ id: jobs.id })
+    .select({ id: jobs.id, params: jobs.params })
     .from(jobs)
     .where(and(eq(jobs.type, target), isClaimable()))
     .orderBy(jobs.createdAt) // oldest first
     .all();
   for (const cand of claimable) {
+    // Don't race a fit that's still being scored for the same posting — the tailor would work
+    // without the gaps and leveling call it's told to steer by. Skip (never fail or consume) the
+    // job: it stays queued, burns no attempt, and the next claim takes it once fit lands. Fit stays
+    // OPTIONAL — this only waits when a fit job actually exists for this posting.
+    if (target === "tailoring") {
+      const postingId = postingIdOf(cand.params);
+      if (postingId != null && hasLiveFitJob(postingId)) continue;
+    }
     const won = tryClaim(cand.id, by, threadId); // atomic; loses the race → try the next candidate
     if (won) return won;
   }

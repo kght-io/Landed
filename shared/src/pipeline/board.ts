@@ -46,6 +46,28 @@ export function groupByCompany(items: Posting[]): ColumnGroup[] {
   return [...m.values()].sort((a, b) => b.items.length - a.items.length);
 }
 
+// A company group that IMPOSES no order of its own.
+export type OrderedGroup<T> = { company: string; rows: T[]; count: number; top: T };
+
+// Group by company, preserving the order you were handed — rows keep their incoming sequence within
+// a company, and groups run in order of first appearance.
+//
+// The distinct name is the point: `groupByCompany` above imposes an order (groups by item count),
+// and this one deliberately does not. Its caller — the pipeline table — hands over rows that are
+// ALREADY sorted by its own comparator, so re-sorting here would restate that policy in a second
+// place and let the two drift. Feeding it a sorted list means the company holding the top-ranked row
+// leads and `top` is that row, with no second sort key to keep in sync; it also makes a click-sort
+// reorder the groups by their best row for free.
+export function groupInOrder<T extends { company: string }>(rows: T[]): OrderedGroup<T>[] {
+  const m = new Map<string, OrderedGroup<T>>();
+  for (const r of rows) {
+    const g = m.get(r.company);
+    if (g) { g.rows.push(r); g.count++; }
+    else m.set(r.company, { company: r.company, rows: [r], count: 1, top: r });
+  }
+  return [...m.values()]; // Map iterates in insertion order — that IS the group ordering.
+}
+
 // Roll all postings up into company aggregates, most-recently-active first.
 export function aggregateCompanies(postings: Posting[]): CompanyAgg[] {
   const m = new Map<string, CompanyAgg>();

@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Bot, Send, Loader2, User, Trash2, PanelRightClose, FileText, Maximize2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { chatState, sendTurn, resetChat, subscribeChat, EMPTY } from "@landed/shared/prep/chat-store";
+import { chatState, sendTurn, resetChat, subscribeChat, EMPTY, type ChatMsg } from "@landed/shared/prep/chat-store";
 
 // A full-height chat with the locked-down interview-prep agent for one company (runs on your
 // subscription; read-only file access to that company's prep folder, no other tools). Designed to
@@ -13,6 +13,56 @@ import { chatState, sendTurn, resetChat, subscribeChat, EMPTY } from "@landed/sh
 // turn. The header lists the folder's research .md files so you can see what the coach is reading.
 // `note` = a system line (e.g. "session refreshed") rendered muted + centered, not a chat bubble.
 type CtxFile = { name: string; size: number; mtime: string };
+
+// One rendered turn, memoized — and the memo is load-bearing, not a micro-optimization. The composer
+// textarea's state lives in PrepChat, so WITHOUT this every keystroke re-rendered the whole
+// transcript, and react-markdown re-parses its source on every render (it caches nothing). That cost
+// ~1.1ms per assistant turn per character: fine on an empty chat, ~60ms/keystroke at 50 turns —
+// several dropped frames per letter, getting worse the longer you talk.
+//
+// The bail-out is exact because the store hands back a referentially stable snapshot (see
+// shared/src/prep/chat-store.ts), so `m` is the same object between turns. It also pays off while a
+// turn streams, when the store DOES change on every tick but the settled turns above it don't.
+const Message = memo(function Message({ m }: { m: ChatMsg }) {
+  if (m.role === "note")
+    return <p className="px-2 py-1 text-center text-[11px] leading-relaxed text-zinc-600">{m.text}</p>;
+
+  // User turns stay a compact right-aligned bubble (plain text — you typed it).
+  if (m.role === "user")
+    return (
+      <div className="flex flex-row-reverse items-start gap-2">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-700 ring-1 ring-zinc-600">
+          <User size={12} className="text-zinc-300" />
+        </span>
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-sky-600 px-3 py-1.5 text-[13px] leading-relaxed text-white">
+          {m.text}
+        </div>
+      </div>
+    );
+
+  // Assistant turns render as full-width markdown prose (headings, lists, code, tables), the
+  // way a Claude/the agent reply reads — not a cramped bubble. Errors stay plain text.
+  return (
+    <div className="flex items-start gap-2">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-500/15 ring-1 ring-sky-500/30">
+        <Bot size={12} className="text-sky-300" />
+      </span>
+      {m.error ? (
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md bg-rose-500/20 px-3 py-1.5 text-[13px] leading-relaxed text-rose-100">
+          {m.text}
+        </div>
+      ) : (
+        <div className="prose-instructions min-w-0 flex-1 pt-0.5">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{m.text}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// Hoisted out of the render: an inline `components={{...}}` object is a new identity every time,
+// which would make react-markdown redo its work even behind the memo.
+const MD_COMPONENTS = { a: (props: React.ComponentPropsWithoutRef<"a">) => <a {...props} target="_blank" rel="noopener noreferrer" /> };
 
 export default function PrepChat({
   storageId,
@@ -170,47 +220,7 @@ export default function PrepChat({
         {msgs.length === 0 && (
           <p className="py-6 text-center text-[12px] leading-relaxed text-zinc-500">{intro ?? "Your interview-prep coach for this company — it reads this company's research files and helps you prep."}</p>
         )}
-        {msgs.map((m, i) => {
-          if (m.role === "note")
-            return <p key={i} className="px-2 py-1 text-center text-[11px] leading-relaxed text-zinc-600">{m.text}</p>;
-
-          // User turns stay a compact right-aligned bubble (plain text — you typed it).
-          if (m.role === "user")
-            return (
-              <div key={i} className="flex flex-row-reverse items-start gap-2">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-700 ring-1 ring-zinc-600">
-                  <User size={12} className="text-zinc-300" />
-                </span>
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-sky-600 px-3 py-1.5 text-[13px] leading-relaxed text-white">
-                  {m.text}
-                </div>
-              </div>
-            );
-
-          // Assistant turns render as full-width markdown prose (headings, lists, code, tables), the
-          // way a Claude/the agent reply reads — not a cramped bubble. Errors stay plain text.
-          return (
-            <div key={i} className="flex items-start gap-2">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-500/15 ring-1 ring-sky-500/30">
-                <Bot size={12} className="text-sky-300" />
-              </span>
-              {m.error ? (
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md bg-rose-500/20 px-3 py-1.5 text-[13px] leading-relaxed text-rose-100">
-                  {m.text}
-                </div>
-              ) : (
-                <div className="prose-instructions min-w-0 flex-1 pt-0.5">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{ a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}
-                  >
-                    {m.text}
-                  </ReactMarkdown>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {msgs.map((m, i) => <Message key={i} m={m} />)}
         {busy && (
           <div className="flex items-center gap-2 text-[12px] text-zinc-400">
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-500/15 ring-1 ring-sky-500/30"><Bot size={12} className="text-sky-300" /></span>

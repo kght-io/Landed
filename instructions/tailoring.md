@@ -36,49 +36,28 @@ what to read, the helper that writes the files, what shape to hand back. See ste
    judgement.) Whatever it tells you to explain about an edit, explain it in the `diff` comments
    under Output — that's the only place your reasoning is recorded.
 
-2. **Produce the files with the `tailor:docx` helper — do NOT hand-edit `document.xml`.** Word
-   splits one visible sentence across several runs (the base résumé's "…built a 0" | "→" |
-   "1 full-stack product…"), so string-searching the raw XML for a phrase misses any match that
-   straddles a run — that's the trap that used to send this job probing byte offsets and corrupting
-   the file. The helper matches against each paragraph's *concatenated* text, applies your edits,
-   and renders the PDF with LibreOffice. Express your tailoring as `{find, replace}` pairs:
-   `find` is text copied **verbatim from the base résumé** (read it with `--text`), `replace` is your
-   tailored line.
-
-   Both steps are **`landed-local` MCP tools**, not shell commands. They already know where the
-   résumés live, so there are no paths to pass and nothing to build from a shell variable
-   (`$ASSET_ROOT` is **not** set in your shell).
+2. **Produce the files with `buildTailoredResume`.** Express your tailoring as `{find, replace}`
+   pairs — `find` copied **verbatim** from `readBaseResumeText()`, `replace` your tailored line.
 
    ```
    1. readBaseResumeText()            → the base résumé as visible text.
                                         Copy your `find` strings verbatim from THIS output.
 
    2. buildTailoredResume({ slug, edits })
-        slug  — the one from `params`, unchanged (see below)
+        slug  — the one from `params`, unchanged
         edits — [{ "find": "<verbatim base line>", "replace": "<tailored line>" }, ...]
       → writes resume.docx (+ resume.pdf) into the app's slug folder.
    ```
 
-   If `landed-local` is not among your tools, this checkout has not built it — say so in your
-   result rather than falling back to editing the .docx by hand.
+   Both are **`landed-local` MCP tools**, not shell commands — there are no paths to pass. If
+   `landed-local` isn't among your tools, this checkout hasn't built it: say so in your result.
 
-   The tool saves to the **exact folder the app dictates** — `resume/<params.postings[].slug>/` —
-   with the **generic filenames** it writes (`resume.docx`, `resume.pdf`). The app dictates the slug
-   (a versioned path like `acme-senior-123/v2`); **don't invent your own** — pass the one in
-   `params` and echo it back unchanged. Each redo is a new `v<N>` folder, so a prior version's files
-   are never overwritten.
-
-   Rules the tool enforces for you, so respect them:
-   - **Every `find` must match, or nothing is written.** The result comes back with
-     `ok: false` and the unmatched strings in `missed`, and any previous résumé in that folder is
-     left untouched. A miss means your `find` isn't verbatim — re-copy it from
-     `readBaseResumeText` (watch for the em-dash `→`, double spaces, and `&`), don't force it.
-   - **The PDF comes from LibreOffice** (`soffice`), which reads the template's real formatting, so
-     it matches the `.docx`. The tool runs it for you and writes fresh files (ASSET_ROOT is
-     cloud-synced — an in-place overwrite corrupts). If LibreOffice is missing you get
-     `ok: true` with `pdf: null` and a `note` — **report that note in your result**. **Never** reach
-     for `fpdf`/`reportlab`/`weasyprint`/`pandoc`.
-   - **The base résumé renders to 3 pages — that is correct, not an overflow bug.** Don't "fix" it.
+   The tool enforces its own rules and **tells you what to do when one fires** — read the `error` or
+   `note` it returns and follow it. You don't need to memorise them here. Two facts it can't tell
+   you, because they look like bugs and aren't:
+   - **The slug is the app's**, a versioned path like `acme-senior-123/v2`. Pass the one in `params`
+     and echo it back unchanged; each redo is a new `v<N>` folder, so nothing is overwritten.
+   - **The base résumé renders to 3 pages. That is correct** — don't "fix" it.
 
 ### Redos (when the task carries a prior conversation)
 
@@ -99,7 +78,6 @@ the job's id, and `records` = one object per tailored posting:
   { "id": 1234, "company": "Stripe", "role": "Staff Software Engineer",
     "slug": "stripe-staff-123/v1",
     "diff": [
-      { "type": "eq",  "text": "EXPERIENCE" },
       { "type": "del", "text": "Built internal tooling for the data team" },
       { "type": "add", "text": "Built distributed payment-ledger services handling 10k tps",
         "comment": "mirrors the JD's 'distributed systems at scale' must-have" },
@@ -110,34 +88,24 @@ the job's id, and `records` = one object per tailored posting:
 ```
 
 Field rules:
-- `id` — **copy `params.postings[].id` back exactly, unchanged.** This is how the app matches your
-  result to the right posting. Don't omit or invent it — echo the number you were given.
-- `slug` — **echo `params.postings[].slug` back exactly** (the versioned `…/v<N>` folder the app
-  told you to write to). Required. This becomes this version's entry in the résumé history.
+- `id`, `slug` — **echo `params.postings[].id` / `.slug` back exactly.** That's how the app matches
+  the result to the posting and files this version. Don't invent either.
 - `company`, `role` — for readability / fallback matching if `id` is missing.
-- `note` — **omit it.** Don't send a prose "what changed" summary — the app no longer shows it and
-  you don't read it. The per-line `diff` `comment`s below ARE the rationale now; put your
-  reasoning there, not in a note.
-- `diff` — **required** (it's the only place your reasoning lives now, and the app renders it as the
-  version's diff view; when omitted it falls back to a plain text diff it computes itself, with no
-  rationale). An **annotated, line-level diff of your tailored résumé against the base résumé** — you
-  produced the edits, so you know exactly what changed and why. An array of ops, **in document
-  order**, each:
-  - `type` — `"eq"` (unchanged line, for context), `"del"` (a base line you removed/replaced),
-    or `"add"` (a line you wrote).
+- `note` — **omit it.** The `diff` comments are the rationale now.
+- `diff` — **required.** A line-level diff of your tailored résumé against the base, in document
+  order. You made the edits, so you know what changed and why. Each op:
+  - `type` — `"del"` (a base line you removed/replaced) or `"add"` (a line you wrote).
   - `text` — the line's text (résumé content only; no markup).
-  - `comment` — **on changed lines (`add`/`del`), the *why*** — the JD-driven reason for the edit
-    (e.g. "mirrors the JD's 'event-driven architecture' requirement", "drops the mobile bullet the
-    JD never asks for"). Keep it to one short clause. Omit `comment` on `eq` context lines and on
-    trivial reorders where the reason adds nothing. Since there's no longer a `note`, the `comment`s
-    must collectively account for the **bullet decisions** (why a bullet was reworded/reordered — or,
-    on a key bullet you deliberately kept, an `eq` line WITH a one-clause comment saying why) and how
-    each **hard gap** was handled. A diff whose changed lines are silent on the bullets signals they
-    were never considered.
+  - `comment` — **on changed lines, the *why*** — the JD-driven reason for the edit (e.g. "mirrors
+    the JD's 'event-driven architecture' requirement", "drops the mobile bullet the JD never asks
+    for"). One short clause. The `comment`s are the only record of your reasoning, so together they
+    must account for the **bullet decisions** and how each **hard gap** was handled. A diff whose
+    changed lines are silent on the bullets signals they were never considered.
 
-  Rules: diff against the **base** résumé (always — even on a redo, you re-tailor from base, so the
-  diff is tailored-vs-base, not vs the prior version). Include a little `eq` context around changes
-  so the diff reads in order, like `git diff`. Don't include blank lines.
+  Rules: diff against the **base** résumé (always — even on a redo you re-tailor from base, so the
+  diff is tailored-vs-base, not vs the prior version). **Send only changed lines** — `add` and `del`.
+  Don't re-emit unchanged `eq` context or blank lines: the app has the base résumé and fills the
+  surrounding context itself, so copying it back is output you're paying for twice.
 
 The app records the `slug` on the matching candidate (matched by `id`, falling back to company +
 url/role) and moves it **Tailoring → Tailored** (still in discovery — applying is what graduates it

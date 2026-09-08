@@ -90,10 +90,26 @@ export function buildTailoredResume(
   if (!isSlug(slug)) return { ok: false, missed: [], error: `not a slug: ${JSON.stringify(slug)}` };
 
   const base = baseResume(root);
-  if (!fs.existsSync(base)) return { ok: false, missed: [], error: "no base résumé — upload resume-ref.docx first" };
+  if (!fs.existsSync(base))
+    return { ok: false, missed: [], error: "no base résumé — upload resume-ref.docx in the app's Settings first" };
 
   const built = buildTailored(fs.readFileSync(base), edits);
-  if (!built.docx) return { ok: false, missed: built.missed };
+  // Nothing is written when any `find` misses — a partial résumé is worse than none, and the
+  // previous version in this folder stays untouched. The guidance rides on the FAILURE rather than
+  // in the playbook, so it's read at the moment it applies instead of on every run: Word splits one
+  // visible sentence across several runs, so a `find` copied from anywhere but readBaseResumeText()
+  // will straddle a run boundary and miss. Re-copy it verbatim — watch the em-dash (→), double
+  // spaces, and &. Never fall back to editing document.xml by hand.
+  if (!built.docx)
+    return {
+      ok: false,
+      missed: built.missed,
+      error:
+        `${built.missed.length} find string${built.missed.length === 1 ? "" : "s"} did not match the base résumé, so nothing was written. ` +
+        "Re-copy each one VERBATIM from readBaseResumeText() — Word fragments a sentence across runs, " +
+        "so text taken from anywhere else won't match. Watch for the em-dash (→), double spaces and &. " +
+        "Do not hand-edit document.xml.",
+    };
 
   const outDir = path.join(root, "resume", slug);
   fs.mkdirSync(outDir, { recursive: true });
@@ -124,6 +140,16 @@ export function buildTailoredResume(
     pdf,
     missed: [],
     // A .docx with no PDF is a partial result the agent must SAY it produced, not paper over.
-    ...(pdf ? {} : { note: "LibreOffice (soffice) is not available — wrote resume.docx only, no PDF." }),
+    // A .docx with no PDF is a partial result the agent must SAY it produced, not paper over — and
+    // must not try to fix with another library. Both instructions live here rather than in the
+    // playbook because this is the only run where they matter.
+    ...(pdf
+      ? {}
+      : {
+          note:
+            "LibreOffice (soffice) is not available — wrote resume.docx only, no PDF. " +
+            "Report this note in your result. Do NOT render the PDF another way " +
+            "(fpdf / reportlab / weasyprint / pandoc all lose the template's formatting).",
+        }),
   };
 }

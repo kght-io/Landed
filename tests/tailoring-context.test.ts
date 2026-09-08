@@ -13,8 +13,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
-import { reset, seedCandidate, db, postings, jobs } from "./helpers";
-import { repoPath } from "@landed/backend/paths";
+import { reset, seedCandidate, db, postings, jobs, realRepoPath } from "./helpers";
 import { enqueueTailoring } from "@landed/backend/jobs/enqueue/tailoring";
 import { getPosting } from "@landed/backend/db/queries";
 import { agentPaths } from "@landed/backend/config";
@@ -144,14 +143,16 @@ test("baseArgs pins an explicit --model so runs don't drift with the CLI default
 // nothing: it reads the playbook, sees `$ASSET_ROOT` and "read the fit record", and spelunks again.
 // AGENTS.md makes brief-sync part of the change; this makes it part of the signal.
 test("instructions/tailoring.md points at the params/getContext data, not a shell env var", () => {
-  const md = readFileSync(repoPath("instructions", "tailoring.md"), "utf8");
+  const md = readFileSync(realRepoPath("instructions", "tailoring.md"), "utf8");
+  // The résumé is built by the `landed-local` MCP tool, not the old `tailor:docx` shell script —
+  // the playbook must name the tool the agent actually has.
+  assert.match(md, /buildTailoredResume/, "the playbook still shows the résumé-building tool");
+  assert.match(md, /readBaseResumeText/, "and where `find` strings are copied from");
   // Naming $ASSET_ROOT to warn the agent OFF it is fine (and useful). What must not survive is a
   // command that actually interpolates it — that's the line the agent copies and runs.
-  const commands = md.split("\n").filter((l) => l.includes("tailor:docx"));
-  assert.ok(commands.length, "the playbook still shows the tailor:docx helper");
-  for (const line of commands) {
+  for (const line of md.split("\n").filter((l) => l.includes("$ASSET_ROOT"))) {
     assert.equal(
-      line.includes("$ASSET_ROOT"),
+      /^\s*(\$|npm |node |bash )/.test(line),
       false,
       `command relies on an unset shell var: ${line.trim()}`,
     );

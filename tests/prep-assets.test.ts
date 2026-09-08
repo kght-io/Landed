@@ -102,7 +102,7 @@ test("a pasted transcript is stored in the DB and still dumped to disk", () => {
   const rows = listTranscripts("pendo");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].name, file.name);
-  assert.equal(rows[0].name, "transcript-1.md");
+  assert.equal(rows[0].name, "recruiter-screen.md", "the typed round label names the file");
   assert.ok(rows[0].bytes > 0);
   assert.match(readTranscript("pendo", file.name) ?? "", /^# Recruiter screen/, "the title is kept as an H1");
 
@@ -110,8 +110,8 @@ test("a pasted transcript is stored in the DB and still dumped to disk", () => {
   const onDisk = fs.readFileSync(path.join(PREP_ROOT, "pendo", "transcripts", file.name), "utf8");
   assert.match(onDisk, /tell me about yourself/);
 
-  // Numbering keeps counting off the stored rows, not the folder.
-  assert.equal(saveTranscript("pendo", "Second one.").name, "transcript-2.md");
+  // An untitled paste still falls back to the counter, off the stored rows rather than the folder.
+  assert.equal(saveTranscript("pendo", "Second one.").name, "transcript-1.md");
 });
 
 test("interview-emails lands one row per email, each carrying its thread id", () => {

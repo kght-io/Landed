@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, FileText, Mail, MessageSquareText, FolderOpen, CheckCircle2, Circle } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Plus, FileText, Mail, MessageSquareText, FolderOpen, CheckCircle2, Circle, Paperclip } from "lucide-react";
 import type { Posting } from "@landed/shared/types";
+import { TRANSCRIPT_ACCEPT } from "@landed/shared/prep/transcript-import";
 import { getPrepAssets, type PrepAssets } from "@/lib/local-capability";
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import { AttachmentChip, revealPrepFolder } from "./PrepFiles";
@@ -49,6 +50,30 @@ function TranscriptDrop({ postingId, onSaved }: { postingId: string; onSaved?: (
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Import fills the box rather than saving straight off: a caption export needs cleaning before
+  // it's worth storing, so you get to see what the parse produced — and set the round label — first.
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await fetch(`/api/applications/${postingId}/transcript/extract`, { method: "POST", body: form });
+      const d = (await r.json().catch(() => ({}))) as { text?: string; suggestedTitle?: string; error?: string };
+      if (d.error || !d.text) { setImportError(d.error ?? "Couldn't read that file."); return; }
+      setBody(d.text);
+      if (!title.trim() && d.suggestedTitle) setTitle(d.suggestedTitle);
+    } catch {
+      setImportError("Couldn't read that file.");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   useEffect(() => {
     let live = true;
@@ -97,15 +122,34 @@ function TranscriptDrop({ postingId, onSaved }: { postingId: string; onSaved?: (
         placeholder="round label (optional) — e.g. System design w/ platform lead"
         className={`${EDIT_BASE} mb-1.5 block w-full rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5 text-[12px] text-zinc-300 focus:border-zinc-600`}
       />
+      {/* Drop a caption export straight onto the box — that's how a transcript usually arrives. */}
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); void importFile(e.dataTransfer.files[0]); }}
         rows={3}
-        placeholder="Paste the interview call transcript…"
+        placeholder="Paste the interview call transcript — or attach a .vtt / .srt / .txt / .docx below…"
         className={`${EDIT_BASE} block w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[13px] leading-relaxed text-zinc-300 focus:border-zinc-600`}
       />
-      <div className="mt-1.5 flex justify-end">
+      {importError && <p className="mt-1 text-[12px] text-rose-300">{importError}</p>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept={TRANSCRIPT_ACCEPT.join(",")}
+        className="hidden"
+        onChange={(e) => { void importFile(e.target.files?.[0]); e.target.value = ""; /* re-picking the same file must re-fire */ }}
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-2">
+        <button
+          onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
+          disabled={importing || saving}
+          title="Attach a Zoom / Meet / Teams caption export (.vtt, .srt) or a text file — timestamps are stripped"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-zinc-400 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+        >
+          <Paperclip size={12} /> {importing ? "Reading…" : "Attach file"}
+        </button>
         <button
           onClick={save}
           disabled={saving || !body.trim()}

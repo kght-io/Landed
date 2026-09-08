@@ -12,8 +12,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 // POST /api/applications/:id/transcript — store a pasted transcript for this company (the app can't
-// record calls). Body: { body, title? }. The row is the record; the numbered file under
-// interview-prep/<slug>/transcripts/ is re-dumped from it for the brief job and the prep chat.
+// record calls). Body: { body, title? } — `title` is the round label, and it names the dump file.
+// The row is the record; the file under interview-prep/<slug>/transcripts/ is re-dumped from it for
+// the brief job and the prep chat.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const slug = postingPrepSlug(id);

@@ -5,7 +5,7 @@ import type { FitVerdictRow } from "../db/schema";
 import { getConfig, setConfig } from "../db/config-store";
 import { decide } from "./decide";
 import { STARTER_CRITERIA, PROFILE_SEED, PROFILE_CONFIG_KEY } from "./seed";
-import type { Criterion, CriterionType, Run, StageTrace, Verdict, VerdictRow } from "./types";
+import type { Criterion, CriterionType, Decision, Run, StageTrace, Verdict, VerdictRow } from "./types";
 
 // The fit-labeling EVAL STORE — the rubric, the accumulated runs/verdicts, and the human labels that
 // are the eval set, plus the deterministic Decide over them. Backend-only (server-side DB access), so
@@ -13,26 +13,111 @@ import type { Criterion, CriterionType, Run, StageTrace, Verdict, VerdictRow } f
 //
 // The standalone Fit Lab that WROTE this data (the /fit-lab page and the `fitlab-assess` job) is gone;
 // what survives is the data layer and its read/label surface, so the labels stay queryable while fit
-// itself is redesigned. There is deliberately no ingest path right now — whatever replaces it should
-// come from the live pipeline, not a side lab.
+// itself is redesigned. That replacement is now here: `recordFitRun` is written from the LIVE fit
+// job (backend/src/jobs/ingest.ts), so runs and their labels come from the real pipeline rather than
+// a side lab.
 
 const now = () => new Date().toISOString();
 
 // ── Rubric (self-seeding) ──────────────────────────────────────────────────────────────────
 export function listCriteria(): Criterion[] {
   let rows = db.select().from(fitCriteria).all();
-  if (rows.length === 0) {
-    for (const c of STARTER_CRITERIA) {
+  // Fill in any starter criterion this install doesn't have yet — NOT just on an empty table.
+  // The rubric grows: `role-discipline` and `comp-floor` were added after the first six had already
+  // been seeded, and an empty-table-only check would have left every existing install without them.
+  // Keyed by `key`, so an existing row (and any weight you've tuned on it) is never overwritten.
+  const have = new Set(rows.map((r) => r.key));
+  const missing = STARTER_CRITERIA.filter((c) => !have.has(c.key));
+  if (missing.length) {
+    for (const c of missing) {
       db.insert(fitCriteria).values({
         key: c.key, label: c.label, type: c.type, weight: c.weight,
         definition: c.definition, active: true, sortOrder: c.sortOrder,
-      }).run();
+      }).onConflictDoNothing().run();
     }
     rows = db.select().from(fitCriteria).all();
   }
   return rows
     .map((r) => ({ key: r.key, label: r.label, type: r.type as CriterionType, weight: r.weight, definition: r.definition ?? "", active: r.active, sortOrder: r.sortOrder }))
     .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+// ── Recording an assessment ───────────────────────────────────────────────────────────────────
+// The agent hands back one VERDICT PER CRITERION with its evidence; the score is computed here by
+// decide(). The agent is never asked for a number, which is what makes the result auditable ("why
+// is this a 62?"), re-weightable without re-prompting, and correctable — your override on a verdict
+// recomputes the score.
+//
+// Every verdict row is also a labelling target. The rows where you disagree are the eval set.
+
+export type IncomingVerdict = { criterion: string; verdict: string; confidence?: number; evidence?: string; reasoning?: string; requirement?: string };
+
+const VERDICTS = new Set<Verdict>(["met", "partial", "unmet", "unclear", "na"]);
+
+export function recordFitRun(input: {
+  postingId: number | null;
+  company: string;
+  role: string;
+  jd: string;
+  model?: string;
+  promptVersion?: string;
+  verdicts: IncomingVerdict[];
+}): { runId: number; score: number; decision: Decision } | null {
+  const criteria = listCriteria();
+  const byKey = new Map(criteria.map((c) => [c.key, c]));
+
+  // Agent output is untrusted. A verdict naming a criterion that doesn't exist can't be scored, and
+  // an unrecognized verdict value has no defined weight — both are DROPPED rather than coerced,
+  // because a guessed value would land in the table the eval set is built from.
+  const usable = input.verdicts.filter(
+    (v) => byKey.has(v.criterion) && VERDICTS.has(v.verdict as Verdict),
+  );
+  // Nothing scorable means the agent didn't actually judge this posting; recording a run would put a
+  // score on it anyway.
+  if (!usable.length) return null;
+
+  const ts = now();
+  const runId = db
+    .insert(fitRuns)
+    .values({
+      postingId: input.postingId,
+      company: input.company,
+      role: input.role,
+      jd: input.jd,
+      model: input.model ?? "",
+      promptVersion: input.promptVersion ?? "",
+      createdAt: ts,
+    })
+    .returning({ id: fitRuns.id })
+    .get().id;
+
+  const rows: VerdictRow[] = usable.map((v) => {
+    const c = byKey.get(v.criterion)!;
+    const id = db
+      .insert(fitVerdicts)
+      .values({
+        runId,
+        criterionKey: v.criterion,
+        requirement: v.requirement ?? null,
+        type: c.type, // snapshot: a later weight change must not rewrite what this run was judged under
+        verdict: v.verdict,
+        confidence: typeof v.confidence === "number" ? Math.max(0, Math.min(100, Math.round(v.confidence))) : null,
+        evidence: v.evidence ?? null,
+        reasoning: v.reasoning ?? null,
+      })
+      .returning({ id: fitVerdicts.id })
+      .get().id;
+    return {
+      id, runId, criterionKey: v.criterion, requirement: v.requirement ?? null,
+      type: c.type, verdict: v.verdict as Verdict,
+      confidence: v.confidence ?? null, evidence: v.evidence ?? null, reasoning: v.reasoning ?? null,
+      humanVerdict: null, humanNote: null, labeledAt: null,
+    };
+  });
+
+  const { score, decision } = decide(criteria, rows);
+  db.update(fitRuns).set({ score, decision }).where(eq(fitRuns.id, runId)).run();
+  return { runId, score, decision };
 }
 
 // ── Profile (the resume the agent judges against) ─────────────────────────────────────────────

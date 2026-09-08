@@ -29,9 +29,38 @@ what to call, what shape to hand back), because the judgment is mine to tune and
 can tell which version earned callbacks. Don't reason about *which* version you have — there's one
 guidance and it's the current one. (If it is ever blank, use your own judgement.)
 
-Produce, per posting: the **main gaps** (each tagged `hard` or `soft`), a **leveling call**, and a
-**fitScore** (0–100). The exact shape of each is under Output below; `fitGuidance` decides what
-goes in them.
+Produce, per posting: a **verdict for every criterion in the rubric**, the **main gaps** (each
+tagged `hard` or `soft`), and a **leveling call**.
+
+## Verdicts — judge the criteria, don't invent a score
+
+**Do NOT send a `fitScore`.** The app computes the score from your verdicts. That is deliberate: a
+number you produce can't be audited ("why is this a 62?"), can't be re-weighted without re-running
+you over everything, and can't be corrected. Per-criterion verdicts can be all three — and each one
+is a labelling target, so my corrections become the eval set that tunes this job.
+
+`getContext` hands you the **rubric** — each criterion's `key`, `type`, and a `definition` telling
+you how to judge it. Answer every one:
+
+| verdict | means |
+| --- | --- |
+| `met` | clearly satisfied |
+| `partial` | partly, or a stretch |
+| `unmet` | clearly not satisfied |
+| `unclear` | the JD doesn't say enough to tell |
+| `na` | the criterion doesn't apply to this posting |
+
+**`type: "gate"` criteria VETO** — an `unmet` there drops the posting whatever the rest score. So on
+a gate, reserve `unmet` for a clear, primary miss; anything arguable is `partial`, which costs
+nothing. That asymmetry is on purpose: a wrongly-kept posting costs me one glance, a wrongly-dropped
+one I never see again.
+
+`unclear` is a real answer, not a cop-out — it scores low but not zero, and it's the signal that
+routes a posting to me instead of being auto-decided. Use it when the JD genuinely doesn't say.
+
+Give **`evidence`** (the line from the JD or résumé you're judging against) and **`confidence`**
+(0–100, your own) on every verdict. Evidence is what makes a wrong verdict correctable rather than
+just wrong.
 
 ## Output
 Hand the result back with the **`submitJobResult` MCP tool** — `type: "fit"`, `jobId` = the
@@ -43,7 +72,16 @@ job's id, and `records` = one rich object per posting. **Give real detail, not o
       "id": 1234,
       "company": "Stripe",
       "role": "Staff Software Engineer",
-      "fitScore": 72,
+      "verdicts": [
+        { "criterion": "location", "verdict": "met", "confidence": 95, "evidence": "Posting says NYC or US-remote" },
+        { "criterion": "yoe-floor", "verdict": "met", "confidence": 90, "evidence": "8+ yrs vs a 5-year floor" },
+        { "criterion": "role-discipline", "verdict": "met", "confidence": 88, "evidence": "Backend/distributed platform team" },
+        { "criterion": "level-match", "verdict": "partial", "confidence": 75, "evidence": "Staff at a rigorous-leveling co — a rung above my baseline" },
+        { "criterion": "must-have-coverage", "verdict": "partial", "confidence": 70, "evidence": "Has Go and distributed systems; no Kafka in the résumé" },
+        { "criterion": "domain-relevance", "verdict": "met", "confidence": 85, "evidence": "Payments ledger — adjacent to ads/risk at scale" },
+        { "criterion": "seniority-signal", "verdict": "met", "confidence": 80, "evidence": "Wants cross-team technical leadership" },
+        { "criterion": "comp-floor", "verdict": "na", "confidence": 99, "evidence": "No range posted" }
+      ],
       "levelMatch": { "call": "stretch", "why": "Staff at a big rigorous-leveling co; against my level baseline I'd more likely land one rung lower." },
       "recommendation": "tailor",
       "strengths": [
@@ -62,7 +100,9 @@ job's id, and `records` = one rich object per posting. **Give real detail, not o
 Field rules:
 - `id` — **copy `params.postings[].id` back exactly, unchanged.** This is how the app matches your
   result to the right posting. Don't omit it, don't invent one — just echo the number you were given.
-- `fitScore` — 0–100; `fitGuidance` says how to weight it.
+- `verdicts` — **required**, one per rubric criterion: `{ criterion, verdict, confidence, evidence, reasoning? }`.
+  `criterion` must be a `key` from the rubric in `getContext` — an invented one is discarded.
+- `fitScore` — **do not send it.** The app computes it from `verdicts`.
 - `levelMatch.call` — exactly one of `match` · `stretch` · `under-leveled`; `levelMatch.why` — one line.
 - `recommendation` — exactly one of `tailor` · `apply` · `skip`.
 - `strengths` — the few that matter (array of strings); omit if none stand out.

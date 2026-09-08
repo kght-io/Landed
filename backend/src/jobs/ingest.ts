@@ -13,6 +13,7 @@ import { exportEmailsFor } from "../prep/export-context";
 import { incomingEmails } from "@landed/shared/agents/emails";
 import { str, num, describeWarnings } from "@landed/shared/util/coerce";
 import { parseRedoLog, nextVersion } from "@landed/shared/jobs/redolog";
+import { recordFitRun, type IncomingVerdict } from "../fitlab/store";
 import { parseBriefs, nextBriefVersion, coerceGaps, coerceSourced } from "@landed/shared/jobs/briefs";
 import { gatherPeerInputs, renderRoster } from "../peercomp/inputs";
 import { setPeerComp } from "./peercomps";
@@ -192,21 +193,32 @@ export function buildFitDetail(r: ResultRecord): FitAssessment {
 // and the full assessment as a JSON blob (fit_detail); advance discovered → assessed.
 export function ingestFit(records: ResultRecord[], dryRun?: boolean): ReconcileResult {
   return ingestCandidateUpdates(records, dryRun, "fit", "scored", (r, cand, co) => {
-    const score = num(r.fitScore);
+    // Verdicts are the real path: the agent judges each criterion, and decide() computes the score
+    // here. `fitScore` from the agent is the LEGACY path, kept only so a result produced before the
+    // playbook changed still lands. When both arrive the computed score wins — a number the model
+    // invented can't be audited or re-weighted, and the verdict rows are also the eval set.
+    const verdicts = Array.isArray(r.verdicts) ? (r.verdicts as IncomingVerdict[]) : [];
+    const run = verdicts.length && !dryRun
+      ? recordFitRun({
+          postingId: cand.id, company: co.name, role: cand.title ?? "",
+          jd: str(r.jd) ?? cand.jd ?? "", verdicts,
+        })
+      : null;
+    const score = run ? run.score : num(r.fitScore);
     const detail = buildFitDetail(r);
     // Append this assessment as a versioned agent turn; fit_score/fit_detail project the latest.
     const log = parseRedoLog(cand.redoLog);
     const version = nextVersion(log, "fit");
     const turn: RedoTurn = {
       phase: "fit", role: "agent", at: new Date().toISOString(),
-      text: detail.summary ?? `Fit ${score ?? "?"} (${detail.levelMatch?.call ?? "?"})`,
+      text: detail.summary ?? `Fit ${score ?? "?"} (${run?.decision ?? detail.levelMatch?.call ?? "?"})`,
       version, fitScore: score ?? undefined, fit: detail,
     };
     const next: Record<string, unknown> = { fitScore: score, fitDetail: JSON.stringify(detail), redoLog: JSON.stringify([...log, turn]) };
     const jd = str(r.jd);
     if (jd) next.jd = jd; // persist the JD the agent used so tailoring reuses it (no re-fetch)
     if (cand.state === "fit_queue") next.state = "assessed";
-    return { next, summary: `${co.name} — ${cand.title} · fit v${version} ${score ?? "?"} (${detail.levelMatch?.call ?? "?"})` };
+    return { next, summary: `${co.name} — ${cand.title} · fit v${version} ${score ?? "?"} (${run?.decision ?? detail.levelMatch?.call ?? "?"})` };
   });
 }
 

@@ -45,11 +45,29 @@ export const STARTER_CRITERIA: Omit<Criterion, "active">[] = [
       "What fraction of the posting's must-have technical requirements does the resume evidence? Full coverage = met, most = partial, a core must-have clearly missing = unmet. Judge against demonstrated experience, not keyword presence.",
   },
   {
+    key: "role-discipline",
+    label: "Discipline",
+    type: "gate",
+    weight: 0,
+    sortOrder: 4,
+    definition:
+      "GATE. Is this the KIND of engineering the candidate does? Judge the posting's discipline against the profile's includeDisciplines and excludeDisciplines. A posting squarely in an included discipline is met; adjacent is partial; one whose primary discipline is excluded (e.g. SRE, ML/research, mobile, frontend-only, data engineering — whatever the profile excludes) is unmet even when the title says Software Engineer and the seniority fits. This is DIFFERENT from domain-relevance (which problem space) and from must-have-coverage (whether the candidate clears the posting's bar): this asks whether the job is the candidate's line of work at all. Because it vetoes, reserve `unmet` for a posting whose PRIMARY discipline is excluded — anything arguable is `partial`, which costs nothing.",
+  },
+  {
+    key: "comp-floor",
+    label: "Comp",
+    type: "signal",
+    weight: 1,
+    sortOrder: 5,
+    definition:
+      "Does the posted compensation clear the profile's compFloor? Compare the posting's stated base or total-comp range against it. Clearly above = met, straddling or ambiguous = partial, clearly below = unmet. If the posting states no range, OR the profile sets no floor, answer `na` — most postings publish nothing, and scoring silence as a miss would penalise the whole board for the absence of information. Never guess a range from the company's reputation.",
+  },
+  {
     key: "domain-relevance",
     label: "Domain relevance",
     type: "signal",
     weight: 1,
-    sortOrder: 4,
+    sortOrder: 6,
     definition:
       "How relevant is the candidate's domain background (from the profile) to the posting's domain? Strong overlap = met, adjacent = partial, unrelated = unmet.",
   },
@@ -58,7 +76,7 @@ export const STARTER_CRITERIA: Omit<Criterion, "active">[] = [
     label: "Seniority signal",
     type: "signal",
     weight: 1,
-    sortOrder: 5,
+    sortOrder: 7,
     definition:
       "Does the posting want scope the candidate demonstrably has — cross-team technical leadership, ownership of org-level strategy, mentoring, 0→1 delivery? Clear match = met, neutral = partial, the posting wants something absent (e.g. people-management) = unmet.",
   },

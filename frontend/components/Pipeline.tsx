@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, Bold, Bot, Check, ChevronDown, ChevronRight, Coins, ExternalLink, GitCompareArrows, Info, List, Loader2, Mail, MessageSquare, MoreHorizontal, Pencil, Pin, RefreshCw, Trash2, UserCheck, X } from "lucide-react";
+import { ArrowRight, Bold, Bot, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, ExternalLink, GitCompareArrows, Info, List, Loader2, Mail, MessageSquare, MoreHorizontal, Pencil, Pin, RefreshCw, Trash2, Undo2, UserCheck, X } from "lucide-react";
 import PopoverPanel, { anchorFrom } from "@/components/Popover";
+import { DiscardButton } from "@/components/board/DiscardMenu";
+import type { DismissReason } from "@landed/shared/jobs/dismiss";
 import { columnOf, fitColor, statusesForColumn, STATUS_CHIP, STATUS_LABEL, trackerDate, type ColumnId } from "@landed/shared/pipeline/stages";
 import TrackerTag from "@/components/TrackerTag";
 import { LevelChip } from "@/components/LevelLadder";
@@ -16,13 +18,13 @@ import CompanyDrawer from "@/components/board/CompanyDrawer";
 import ResumeDiffModal from "@/components/ResumeDiff";
 import PeerCompModal from "@/components/PeerCompModal";
 import { tailorDiffFor, lastTailoredAt } from "@landed/shared/jobs/redolog";
-import { aggregateCompanies, type CompanyAgg } from "@landed/shared/pipeline/board";
+import { aggregateCompanies, groupInOrder, type CompanyAgg } from "@landed/shared/pipeline/board";
 import {
   applyClosedFilter, closedFilterCounts, resolveClosedFilter, NO_CLOSED_FILTER,
   type ClosedFilter as ClosedFilterState,
 } from "@landed/shared/pipeline/closed-filter";
 import { ResTh } from "@/components/ResizableTable";
-import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, ALL_STEPS, DEFAULT_STEP, resolveStep, stepStatesFor as stepStates, stepCount, type SpineStep } from "@landed/shared/pipeline/discovery";
+import { DISCOVERY_SPINE as SPINE, DISCOVERY_ARCHIVE as ARCHIVE, ALL_STEPS, DEFAULT_STEP, resolveStep, stepStatesFor as stepStates, stepCount, MOVE_TARGETS, type SpineStep } from "@landed/shared/pipeline/discovery";
 import type { Comment, Posting, FitAssessment, RedoTurn, Status } from "@landed/shared/types";
 import { JobStatusChip, type WorkStatus } from "@/components/JobStatus";
 import { ago, fmtTs } from "@landed/shared/format/time";
@@ -50,7 +52,7 @@ const COL_CLASS: Record<string, string> = {
 // matched + review + fit_queue + assessed; Tailor Resume = tailoring + tailored; Apply Later = apply_later); the last
 // three are TRACKER steps that read `postings` (the applications table) filtered by shared/src/pipeline/stages columnOf, and
 // a row click opens the company drawer to manage it.
-type ActionKey = "queue-fit" | "discard" | "tailor" | "apply";
+type ActionKey = "queue-fit" | "discard" | "tailor" | "apply" | "revert";
 // Tracker steps map a spine key → the pipeline column its postings live in (shared/src/pipeline/stages columnOf).
 const STEP_COLUMN: Record<string, ColumnId> = { applied: "applied", interview: "interviewing", closed: "closed" };
 const isTrackerStep = (key: string) => key in STEP_COLUMN;
@@ -104,7 +106,7 @@ const ACTIONS_BY_STATE: Record<string, ActionKey[]> = {
   apply_later: ["apply", "tailor", "discard"], // held for later → the quick action is to mark it applied
   tailoring: ["apply", "discard"],
   tailored: ["apply", "discard"],
-  dismissed: ["queue-fit"],
+  dismissed: ["revert", "queue-fit"], // undo the discard, or send it straight on to fit
   filtered: ["queue-fit", "discard"],
 };
 
@@ -123,6 +125,7 @@ const CANDIDATE_STATES = new Set(["matched", "review", "fit_queue", "assessed", 
 // both Fit Assessment) the row just changes state; otherwise it drops out. Either way we skip the full
 // re-fetch, so the surrounding rows don't flash or re-sort under you.
 const ACTION_RESULT_STATE: Record<ActionKey, string> = {
+  revert: "matched",
   "queue-fit": "fit_queue",
   discard: "dismissed",
   tailor: "tailoring",
@@ -142,22 +145,10 @@ const ACTION_META: Record<ActionKey, { label: string; tone: "emerald" | "rose" |
   tailor: { label: "Tailor", tone: "sky", title: "Hand off to the agent — tailor a resume → next stage", icon: Bot, arrow: true },
   apply: { label: "Mark applied", tone: "emerald", title: "Mark applied → moves to the tracker", icon: Check, arrow: true },
   discard: { label: "Discard", tone: "rose", title: "Discard — won't resurface", icon: Trash2 },
+  // Undo, not a forward move: back to the triage pile it came from, and its dismissal reason is
+  // cleared. Leaving the label behind would keep a mis-click counting as a negative in the eval set.
+  revert: { label: "Undo discard", tone: "amber", title: "Undo the discard — back to Scan results, and clear its reason", icon: Undo2 },
 };
-
-// "Move to…" jumps a posting straight to any stage, OUT of sequence — surfaced in the ⋯ menu on every
-// row (e.g. send a fresh match straight to Applied). Each target is a stage's canonical landing
-// state; a row's own stage is hidden from its menu (see STATE_STAGE below). One PATCH to the unified
-// posting endpoint handles the move in any stage; the matching side effects mirror the drawer's
-// selector (stamp the applied date, flag interviewed).
-const MOVE_TARGETS: { label: string; state: string; stage: string }[] = [
-  { label: "Fit assessment", state: "review", stage: "fit" },
-  { label: "Tailor resume", state: "tailoring", stage: "tailor" },
-  { label: "Apply later", state: "apply_later", stage: "later" },
-  { label: "Applied", state: "applied", stage: "applied" },
-  { label: "Interviewing", state: "interview", stage: "interview" },
-  { label: "Rejected", state: "rejected", stage: "closed" },
-  { label: "Discarded", state: "dismissed", stage: "dismissed" },
-];
 
 type Scanned = {
   id: number; company: string; title: string; location: string | null; url: string | null;
@@ -203,6 +194,30 @@ function daysSince(iso?: string | null): number | null {
 const isNewRow = (p: FRow): boolean => {
   const d = daysSince(p.addedAt);
   return d !== null && d <= NEW_WINDOW_DAYS;
+};
+
+// A row's place in its company group. The group's best posting renders as a NORMAL row (`lead`) and
+// carries the disclosure for its siblings; the siblings render `nested` under it once opened.
+//
+// A union rather than one all-optional shape: only a lead has a count to show or a disclosure to
+// drive, and only a child needs the rail. Stating that in the type means the render sites narrow
+// instead of guarding, and a child can't be handed a count nothing will read.
+type RowGroup =
+  | { lead: true; nested?: false; count: number; open: boolean; onToggle: () => void }
+  | { lead?: false; nested: true };
+
+// Group chrome for one cell: the rule above a lead row, the rail down a child's company cell.
+//
+// The colors are inline rather than `border-*` utilities because Td's own `border-zinc-900` is the
+// border-color SHORTHAND — it covers all four sides, so a same-specificity `border-l-*` utility wins
+// or loses on Tailwind's emission order alone. Inline wins outright. globals.css mirrors the zinc
+// ramp for the (only) light theme, so these resolve to #e4e4e7 / #d4d4d8 — the former is already the
+// app's border grey. Full strength on purpose: an opacity modifier makes either line vanish.
+const groupCell = (k: string, g?: RowGroup): { style: React.CSSProperties; className: string } => {
+  if (g?.lead) return { style: { borderTopColor: "var(--color-zinc-800)" }, className: "border-t" };
+  if (g?.nested && k === "company")
+    return { style: { borderLeftColor: "var(--color-zinc-700)" }, className: "border-l-2 !pl-4" };
+  return { style: {}, className: "" };
 };
 
 // Compact relative age — m / h / d / mo ago — for the "scanned … ago" line in the company cell.
@@ -466,10 +481,16 @@ export default function Pipeline() {
   // Bulk selection: the set of selected row ids (checkbox column). Cleared whenever the step changes
   // so a selection never leaks across stages. The bulk-action bar (bottom-center) appears when non-empty.
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Fit Assessment groups its rows by company, COLLAPSED by default — that's the feature. 61 loose
+  // rows clustered in a handful of companies is what makes clearing them janitorial; a company you
+  // never opened isn't an outstanding task. Same shape as the scan-results triage
+  // (components/board/ScanResults.tsx), which solved this first.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   useEffect(() => {
     // Reacting to the step changing (an external value), not a cascading render off our own state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelected(new Set());
+    setExpanded(new Set()); // a company you expanded in one step isn't expanded in the next
   }, [tab]);
   const toggleSel = useCallback((id: number) => setSelected((s) => {
     const n = new Set(s);
@@ -534,7 +555,7 @@ export default function Pipeline() {
   // Inline row editing — click the row's edit pencil to edit company/title/location in place (instead
   // of opening the drawer). One row at a time; `editDraft` holds the working values until Save.
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<{ company: string; title: string; location: string }>({ company: "", title: "", location: "" });
+  const [editDraft, setEditDraft] = useState<{ company: string; title: string; location: string; url: string }>({ company: "", title: "", location: "", url: "" });
   // Resume diff modal — opened from the Tailor step's resume cell (and the drawer's resume row).
   // Track the row's posting id alongside the slug so the modal can offer "redo with a note".
   const [peerOpen, setPeerOpen] = useState(false);
@@ -672,7 +693,7 @@ export default function Pipeline() {
   // `queueOnly` (the ⋯ "Queue" section) hands fit/tailor work to the agent WITHOUT moving the posting's
   // stage — actions are decoupled from status tracking. The default (inline quick buttons) still
   // advances the stage.
-  const act = async (id: number, action: ActionKey, queueOnly = false) => {
+  const act = async (id: number, action: ActionKey, queueOnly = false, reason?: DismissReason) => {
     // Graceful in-place update — no full re-fetch. A row that stays in the open step (queue-fit:
     // review → fit_queue) just changes state; one that leaves (discard, tailor, apply) drops out.
     // The other rows keep their position instead of flashing/re-sorting. queueOnly never moves a row.
@@ -707,7 +728,7 @@ export default function Pipeline() {
           : rs.filter((r) => r.id !== id)
       );
     }
-    const r = await fetch(`/api/scanned/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, queueOnly, ...(appliedDate ? { appliedDate } : {}) }) }).catch(() => null);
+    const r = await fetch(`/api/scanned/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, queueOnly, ...(appliedDate ? { appliedDate } : {}), ...(reason ? { reason } : {}) }) }).catch(() => null);
     if (!r || !r.ok) { loadRows(); return; } // failed — reconcile the table from the server
     const d = await r.json().catch(() => ({}));
     if (d.fitAlreadyQueued) notify(`Fit assessment is already queued for ${row?.company ?? "this posting"} — skipped the duplicate.`);
@@ -805,7 +826,7 @@ export default function Pipeline() {
 
   // Inline-edit input for an editing row's company/title/location cells. Enter saves, Escape cancels;
   // clicks are kept off the row (which would open the drawer).
-  const editInput = (field: "company" | "title" | "location", p: FRow, placeholder: string) => (
+  const editInput = (field: "company" | "title" | "location" | "url", p: FRow, placeholder: string) => (
     <input
       value={editDraft[field]}
       autoFocus={field === "company"}
@@ -817,7 +838,10 @@ export default function Pipeline() {
     />
   );
 
-  const cellContent = (k: string, p: FRow): React.ReactNode => {
+  // `g` marks a row's place in a company group (Fit step only): `lead` is the group's top posting —
+  // a NORMAL row, so you read the real fit and gaps rather than a summary — carrying the disclosure
+  // for the rest; `nested` is one of those revealed siblings, indented under it.
+  const cellContent = (k: string, p: FRow, g?: RowGroup): React.ReactNode => {
     const editing = editingId === p.id;
     switch (k) {
       case "sel":
@@ -837,25 +861,71 @@ export default function Pipeline() {
         );
       case "company": {
         if (editing) return editInput("company", p, "company");
-        const scanned = relAge(p.scannedAt);
+        const more = g?.lead ? g.count - 1 : 0;
         return (
           <span className="flex items-start gap-1.5">
-            <button
-              onClick={(e) => { e.stopPropagation(); togglePin(p); }}
-              title={p.pinned ? "Unpin" : "Pin to top"}
-              className={`mt-0.5 shrink-0 transition ${p.pinned ? "text-amber-300" : "text-zinc-600 opacity-0 hover:text-zinc-300 group-hover:opacity-100"}`}
-            >
-              <Pin size={12} className={p.pinned ? "fill-amber-300/30" : ""} />
-            </button>
+            {/* The disclosure takes the pin's slot on a lead row — the pin is invisible until hover
+                anyway, so nothing is displaced. Every other row keeps the pin. */}
+            {g?.lead && more > 0 ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); g.onToggle(); }}
+                title={g.open ? `Hide the other ${more} at ${p.company}` : `Show ${more} more at ${p.company}`}
+                className="mt-0.5 shrink-0 text-zinc-500 transition hover:text-zinc-200"
+              >
+                {g.open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); togglePin(p); }}
+                title={p.pinned ? "Unpin" : "Pin to top"}
+                className={`mt-0.5 shrink-0 transition ${p.pinned ? "text-amber-300" : "text-zinc-600 opacity-0 hover:text-zinc-300 group-hover:opacity-100"}`}
+              >
+                <Pin size={12} className={p.pinned ? "fill-amber-300/30" : ""} />
+              </button>
+            )}
             <span className="min-w-0 flex-1">
-              {renderCompany(p.company)}
-              {scanned && <span className="mt-0.5 block text-[11px] text-zinc-600">scanned {scanned}</span>}
+              {/* A child's company is its lead's, by construction — printing it again says nothing
+                  and costs the widest frozen column. Omitting it makes the rule for the eye exact:
+                  a row with a company name IS a lead row. The rail on the cell carries the tie. */}
+              {!g?.nested && renderCompany(p.company)}
+              {/* "+N more" is the count that used to sit on a separate header row. It doubles as the
+                  hit target, so the disclosure works without aiming at a 13px chevron. */}
+              {g?.lead && more > 0 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); g.onToggle(); }}
+                  className="mt-0.5 block text-[11px] text-zinc-500 transition hover:text-zinc-300"
+                >
+                  {g.open ? "hide" : `+${more} more`}
+                </button>
+              )}
             </span>
-            {isNewRow(p) && <NewTag />}
           </span>
         );
       }
-      case "title": return editing ? editInput("title", p, "title") : <Title text={p.title} url={p.url} />;
+      // "scanned … ago" and NEW describe the POSTING, so they live with the title. In the company
+      // column they read as facts about the company, and on a grouped child — whose company cell is
+      // otherwise empty — the scan line was left stranded at the top of a blank cell.
+      case "title": {
+        // The JD link is edited HERE rather than in a column of its own — it belongs to the title
+        // (the title IS the link when one exists), and a posting whose URL is wrong is usually one
+        // whose title needs a look too, so the two are fixed in one pass.
+        if (editing) return (
+          <span className="flex flex-col gap-1">
+            {editInput("title", p, "title")}
+            {editInput("url", p, "JD link — empty to remove")}
+          </span>
+        );
+        const scanned = relAge(p.scannedAt);
+        return (
+          <span className="flex flex-col gap-0.5">
+            <span className="flex flex-wrap items-start gap-1.5">
+              <Title text={p.title} url={p.url} />
+              {isNewRow(p) && <NewTag />}
+            </span>
+            {scanned && <span className="text-[11px] text-zinc-600">scanned {scanned}</span>}
+          </span>
+        );
+      }
       case "lvl": return <LevelChip company={p.company} leveling={p.leveling} levelingRef={levelingRef ?? DEFAULT_LEVELING_REF} />;
       case "fit": {
         const ws = fitStatusOf(p);
@@ -930,7 +1000,7 @@ export default function Pipeline() {
             <button onClick={cancelEdit} title="Cancel (Esc)" className="rounded-md p-1 text-zinc-400 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-800"><X size={14} /></button>
           </span>
         );
-        return <ActionCell actions={ACTIONS_BY_STATE[p.state] ?? []} state={p.state} fitDone={p.fitScore != null || !!p.fit} resumeDone={!!p.resumeDir} onAct={(a, queueOnly) => act(p.id, a, queueOnly)} onMove={(s) => moveTo(p, s)} onEdit={() => startEdit(p)} />;
+        return <ActionCell actions={ACTIONS_BY_STATE[p.state] ?? []} state={p.state} fitDone={p.fitScore != null || !!p.fit} resumeDone={!!p.resumeDir} onAct={(a, queueOnly, reason) => act(p.id, a, queueOnly, reason)} onMove={(s) => moveTo(p, s)} onEdit={() => startEdit(p)} />;
       default: return null;
     }
   };
@@ -961,6 +1031,59 @@ export default function Pipeline() {
   // drawer from the response; then we refresh the scan rows + counts so the funnel reflects it.
   const refreshScan = () => { loadRows(); loadCounts(terms); reload(); };
 
+  // One table row, shared by the flat and grouped renders below — so a group's lead posting is
+  // literally the same row as any other, not a summary that can drift from it.
+  const dataRow = (p: FRow, g?: RowGroup) => (
+    <tr
+      key={p.id}
+      onClick={editingId === p.id ? undefined : p.posting ? () => selectJob(p.posting!) : () => openScanRow(p.id)}
+      className={`group text-[13px] text-zinc-300 hover:bg-zinc-800/50 ${
+        // Zebra parity is meaningless once groups have variable sizes: a lead row's stripe would
+        // flip depending on how many siblings the group ABOVE it happened to have open, so whether
+        // a row was grey carried no information. Grouped rows key their fill off their ROLE instead
+        // — leads sit on the page ground at full strength, children on a faint wash.
+        g ? (g.nested ? "bg-zinc-900/20" : "") : "odd:bg-zinc-900/30"
+      } ${editingId === p.id ? "" : "cursor-pointer"}`}
+    >
+      {/* The rule sits above each lead so the groups read as blocks; the rail runs down the CELL
+          (not the inner span) so it spans the full row height and reads as one continuous line
+          through a group's children rather than a stack of dashes. See groupCell. */}
+      {fcols.map((k) => {
+        const gc = groupCell(k, g);
+        return (
+          <Td
+            key={k}
+            onClick={k === "sel" ? (e) => e.stopPropagation() : undefined}
+            style={{ ...(isPinned(k) ? pinnedStyle(k, 10) : colStyle(k)), ...gc.style }}
+            className={`${COL_CLASS[k] ?? ""} ${isPinned(k) ? pinnedCls(k, true) : ""} ${gc.className}`}
+          >{cellContent(k, p, g)}</Td>
+        );
+      })}
+    </tr>
+  );
+
+  // EVERY step groups by company — the candidate steps and the tracker steps alike. A company's
+  // postings cluster the whole way down the pipeline, not just in Fit, and the same read applies at
+  // each stage: see the one that matters, keep the rest to hand.
+  //
+  // `rows` is already ordered by the comparator above, and groupInOrder preserves that order — which
+  // is what makes a click-sort sort at the COMPANY level for free. A company's first appearance in
+  // the sorted list is its top row under that sort, and groups run in order of first appearance, so
+  // sorting reorders the companies by their best row rather than shredding the grouping. Nothing
+  // here re-sorts; the one comparator stays authoritative for both levels. Which row leads therefore
+  // follows each step's own default: best fit in Fit, most recent activity in the tracker steps.
+  //
+  // A company with a single posting groups to itself and renders as an ordinary row — no chevron, no
+  // "+N more" — so this costs nothing on the steps that hold only a handful.
+  const grouped = rows !== null ? groupInOrder(rows) : null;
+  const toggleGroup = (company: string) =>
+    setExpanded((prev) => { const n = new Set(prev); if (n.has(company)) n.delete(company); else n.add(company); return n; });
+  // Only a company with siblings has anything to disclose — a lone posting is already fully shown.
+  const expandable = grouped?.filter((g) => g.count > 1) ?? [];
+  // "Any open", not "all open": the expand-all button flips to Collapse as soon as ONE company is
+  // open, so a single click always gets you back to the collapsed default no matter how you got here.
+  const anyExpanded = expandable.some((g) => expanded.has(g.company));
+
   // --- Bulk actions over the selected rows ---
   const visibleIds = (rows ?? []).map((r) => r.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
@@ -985,7 +1108,16 @@ export default function Pipeline() {
     pendo.track("bulk_action", { action: `move:${state}`, count: selected.size, step: tab });
     await bulkPatch({ status: state, ...extra });
   };
-  const bulkDiscard = () => { pendo.track("bulk_action", { action: "discard", count: selected.size, step: tab }); return bulkPatch({ status: "dismissed" }); };
+  // Goes through /api/scanned rather than the applications PATCH, so a bulk discard lands on the
+  // same validated path as a single one and carries its reason. Selecting a batch naturally groups
+  // rows that share a reason, which is what makes one label honest across many rows.
+  const bulkDiscard = async (reason: DismissReason) => {
+    pendo.track("bulk_action", { action: "discard", count: selected.size, step: tab, reason });
+    const ids = [...selected];
+    await Promise.all(ids.map((id) =>
+      fetch(`/api/scanned/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "discard", reason }) }).catch(() => {})));
+    afterBulk();
+  };
   // The agent hand-offs enqueue jobs, so they go through the scanned endpoint (which creates the fit/
   // tailoring job); then pulse the queue.
   const bulkHandoff = async (action: "queue-fit" | "tailor") => {
@@ -1002,13 +1134,17 @@ export default function Pipeline() {
   };
   // Inline row edit: open (seed the draft from the row), cancel, and save (PATCH only the changed
   // fields — works for BOTH scan-stage and tracker rows since /api/applications/:id handles any stage).
-  const startEdit = (p: FRow) => { setScanPosting(null); setSelectedCompany(null); setSelectedJobId(null); setEditingId(p.id); setEditDraft({ company: p.company, title: p.title, location: p.location ?? "" }); };
+  const startEdit = (p: FRow) => { setScanPosting(null); setSelectedCompany(null); setSelectedJobId(null); setEditingId(p.id); setEditDraft({ company: p.company, title: p.title, location: p.location ?? "", url: p.url ?? "" }); };
   const cancelEdit = () => setEditingId(null);
   const saveEdit = async (p: FRow) => {
     const body: Record<string, unknown> = {};
     if (editDraft.title.trim() && editDraft.title.trim() !== p.title) body.role = editDraft.title.trim();
     const loc = editDraft.location.trim() || null;
     if (loc !== (p.location ?? null)) body.location = loc;
+    // Empty box → null, never "": an empty string is a URL the row would still render as a link,
+    // and it would be a dead one. Clearing the box has to mean "this posting has no link".
+    const url = editDraft.url.trim() || null;
+    if (url !== (p.url ?? null)) body.url = url;
     const co = editDraft.company.trim();
     if (co && co !== p.company) body.moveToCompany = co; // reassign this posting to that company (created if new)
     setEditingId(null);
@@ -1063,6 +1199,20 @@ export default function Pipeline() {
             </button>
             {showArchive && ARCHIVE.map((s) => <StepBtn key={s.key} step={s} count={count(s)} active={tab === s.key} onClick={() => pickStep(s.key)} />)}
             <div className="ml-auto flex items-center gap-2">
+              {/* Open/close every company at once. Collapsed is the default and the point of the
+                  grouped view, so the button leads with "Expand all" and only offers the reverse
+                  once something is open — it reads as the way BACK to the tidy state. Only shown
+                  when there's actually more than one group to act on. */}
+              {expandable.length > 0 && (
+                <button
+                  onClick={() => setExpanded(anyExpanded ? new Set() : new Set(expandable.map((g) => g.company)))}
+                  title={anyExpanded ? "Collapse every company" : `Show every posting at all ${expandable.length} companies that have more than one`}
+                  className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-zinc-300 ring-1 ring-inset ring-zinc-800 transition hover:text-zinc-100 hover:ring-zinc-700"
+                >
+                  {anyExpanded ? <ChevronsDownUp size={13} className="text-zinc-400" /> : <ChevronsUpDown size={13} className="text-zinc-400" />}
+                  {anyExpanded ? "Collapse all" : "Expand all"}
+                </button>
+              )}
               {/* Compare comp across every active interviewing role — opens a popup with the raw
                   tracker data + an "Enrich with research" action. Scoped to the Interviewing view. */}
               {tab === "interview" && (
@@ -1221,22 +1371,19 @@ export default function Pipeline() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(rows ?? []).map((p) => (
-                    <tr
-                      key={p.id}
-                      onClick={editingId === p.id ? undefined : p.posting ? () => selectJob(p.posting!) : () => openScanRow(p.id)}
-                      className={`group text-[13px] text-zinc-300 odd:bg-zinc-900/30 hover:bg-zinc-800/50 ${editingId === p.id ? "" : "cursor-pointer"}`}
-                    >
-                      {fcols.map((k) => (
-                        <Td
-                          key={k}
-                          onClick={k === "sel" ? (e) => e.stopPropagation() : undefined}
-                          style={isPinned(k) ? pinnedStyle(k, 10) : colStyle(k)}
-                          className={`${COL_CLASS[k] ?? ""} ${isPinned(k) ? pinnedCls(k, true) : ""}`}
-                        >{cellContent(k, p)}</Td>
-                      ))}
-                    </tr>
-                  ))}
+                  {/* A company shows its top row as an ORDINARY row — real fit, real gaps, real
+                      actions — and that row carries the disclosure for the rest. There's no summary
+                      line that could drift out of sync with the row it claims to summarize, because
+                      the lead IS one of the rows. */}
+                  {(grouped ?? []).map((g) => {
+                    const open = expanded.has(g.company);
+                    return (
+                      <Fragment key={g.company}>
+                        {dataRow(g.top, { lead: true, count: g.count, open, onToggle: () => toggleGroup(g.company) })}
+                        {open && g.rows.slice(1).map((r) => dataRow(r, { nested: true }))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -1366,7 +1513,7 @@ function DropTailoringModal({ company, role, target, onResolve }: { company: str
 // Floating bulk-action bar (bottom-center) shown while rows are selected. Hand-offs (Assess fit /
 // Tailor) only appear for candidate steps; "Move to" opens the same stage list as a row's ⋯ menu.
 function BulkBar({ count, candidate, onClear, onDiscard, onAssess, onTailor, onMove }: {
-  count: number; candidate: boolean; onClear: () => void; onDiscard: () => void; onAssess: () => void; onTailor: () => void; onMove: (state: string) => void;
+  count: number; candidate: boolean; onClear: () => void; onDiscard: (reason: DismissReason) => void; onAssess: () => void; onTailor: () => void; onMove: (state: string) => void;
 }) {
   const [movePos, setMovePos] = useState<{ x: number; y: number } | null>(null);
   return (
@@ -1394,7 +1541,12 @@ function BulkBar({ count, candidate, onClear, onDiscard, onAssess, onTailor, onM
             </div>
           </PopoverPanel>
         )}
-        <BulkBtn tone="rose" icon={Trash2} onClick={onDiscard}>Discard</BulkBtn>
+        {/* Opens the reason menu instead of discarding immediately. One extra click for a whole
+            batch is cheap, and it's what keeps the label set from filling with nulls. */}
+        <DiscardButton
+          onPick={onDiscard}
+          render={(open) => <BulkBtn tone="rose" icon={Trash2} onClick={open}>Discard as</BulkBtn>}
+        />
         <button onClick={onClear} title="Clear selection" className="ml-0.5 rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"><X size={15} /></button>
       </div>
     </div>
@@ -1898,7 +2050,7 @@ function CommentCell({ id, comments, onChanged }: { id: number; comments: Commen
   );
 }
 
-function ActionCell({ actions, state, fitDone, resumeDone, onAct, onMove, onEdit }: { actions: ActionKey[]; state: string; fitDone?: boolean; resumeDone?: boolean; onAct: (a: ActionKey, queueOnly?: boolean) => void; onMove: (state: string) => void; onEdit: () => void }) {
+function ActionCell({ actions, state, fitDone, resumeDone, onAct, onMove, onEdit }: { actions: ActionKey[]; state: string; fitDone?: boolean; resumeDone?: boolean; onAct: (a: ActionKey, queueOnly?: boolean, reason?: DismissReason) => void; onMove: (state: string) => void; onEdit: () => void }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   // Just the PRIMARY action as a quick button; every secondary action folds into the ⋯ menu, which
   // also carries "Move to" (jump to any stage out of sequence). The ⋯ shows on every row — even
@@ -1908,8 +2060,13 @@ function ActionCell({ actions, state, fitDone, resumeDone, onAct, onMove, onEdit
   // action column is icon-only and pinned to the right edge (RIGHT_W.act); the wrapper flex-wraps as
   // a backstop if a row ever carries more than a couple of quick actions.
   // Only Discard is a one-click quick action now; every other action lives in the ⋯ menu, and bulk
-  // selection handles the rest across many rows at once.
-  const inline = actions.includes("discard") ? (["discard"] as ActionKey[]) : [];
+  // selection handles the rest across many rows at once. On the Discarded pile there is no Discard
+  // to offer, and undo IS the reason you'd be looking at that pile — so it takes the quick slot.
+  const inline = actions.includes("discard")
+    ? (["discard"] as ActionKey[])
+    : actions.includes("revert")
+      ? (["revert"] as ActionKey[])
+      : [];
   // Queue hand-offs get their own section, so keep them out of the generic secondary list.
   const more = actions.filter((a) => !inline.includes(a) && !QUEUE_KEYS.includes(a));
   // On candidate rows, offer both queue hand-offs — minus whichever is already the inline quick button.
@@ -1922,6 +2079,22 @@ function ActionCell({ actions, state, fitDone, resumeDone, onAct, onMove, onEdit
       {inline.map((a) => {
         const m = ACTION_META[a];
         const I = m.icon;
+        // Discard opens the reason menu rather than firing straight away — the label is the whole
+        // point of the pile, and a one-click unlabelled discard is how the dataset fills with nulls.
+        // Everything else stays a direct action.
+        if (a === "discard") {
+          return (
+            <DiscardButton
+              key={a}
+              onPick={(reason) => onAct("discard", false, reason)}
+              render={(open) => (
+                <Btn tone={m.tone} onClick={() => {}} title="Discard as — pick a reason">
+                  <span onClick={open} className="inline-flex"><Trash2 size={14} /></span>
+                </Btn>
+              )}
+            />
+          );
+        }
         // Icon-only (label is the tooltip) so the column stays compact enough to pin to the right edge.
         return (
           <Btn key={a} tone={m.tone} onClick={() => onAct(a)} title={m.title}>{I ? <I size={14} /> : m.label}</Btn>
@@ -1950,6 +2123,24 @@ function ActionCell({ actions, state, fitDone, resumeDone, onAct, onMove, onEdit
             {more.map((a) => {
               const m = ACTION_META[a];
               const I = m.icon;
+              // Same rule as the quick button: a discard from the ⋯ menu still names its pile.
+              if (a === "discard") {
+                return (
+                  <DiscardButton
+                    key={a}
+                    onPick={(reason) => { onAct("discard", false, reason); setPos(null); }}
+                    render={(open) => (
+                      <button
+                        onClick={open}
+                        title="Discard as — pick a reason"
+                        className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium transition hover:bg-zinc-800 ${TONE_TEXT[m.tone]}`}
+                      >
+                        <Trash2 size={13} />{m.label}
+                      </button>
+                    )}
+                  />
+                );
+              }
               return (
                 <button
                   key={a}

@@ -48,3 +48,25 @@ export const resolveStep = (stored: unknown): string =>
 // The scan-store states a step spans — what `/api/scanned?state=` is asked for. An unrecognized key
 // stands for itself, so a single-state step needs no entry.
 export const stepStatesFor = (key: string): string[] => ALL_STEPS.find((s) => s.key === key)?.states ?? [key];
+
+// "Move to…" jumps a posting straight to any stage, OUT of sequence — surfaced in the ⋯ menu on every
+// row (e.g. send a fresh match straight to Applied). Each target is a stage's canonical landing
+// state; a row's own stage is hidden from its menu (see Pipeline's STATE_STAGE). One PATCH to the
+// unified posting endpoint handles the move in any stage; the matching side effects mirror the
+// drawer's selector (stamp the applied date, flag interviewed).
+//
+// Lives HERE, beside the spine, because the two must agree: a target whose `state` isn't one of its
+// `stage`'s states sends the row to a step that won't show it. That's not hypothetical — "Fit
+// assessment" pointed at `review` for a month after 720bdbb moved triage off the Fit step onto
+// /watchlist, so the move silently evicted postings from the pipeline. `move-targets.test.ts`
+// pins the invariant.
+export type MoveTarget = { label: string; state: string; stage: string };
+export const MOVE_TARGETS: MoveTarget[] = [
+  { label: "Fit assessment", state: "fit_queue", stage: "fit" },
+  { label: "Tailor resume", state: "tailoring", stage: "tailor" },
+  { label: "Apply later", state: "apply_later", stage: "later" },
+  { label: "Applied", state: "applied", stage: "applied" },
+  { label: "Interviewing", state: "interview", stage: "interview" },
+  { label: "Rejected", state: "rejected", stage: "closed" },
+  { label: "Discarded", state: "dismissed", stage: "dismissed" },
+];

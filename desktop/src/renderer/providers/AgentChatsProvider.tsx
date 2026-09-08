@@ -25,6 +25,10 @@ export type ChatState = {
   model?: string;
   costUsd?: number;
   autoDrain?: boolean;
+  // Always empty here: queuing a follow-up needs a way to SEND one, and main's `agent:start` takes
+  // no message (see below). The composer reads this to render the pending chips, so leaving it empty
+  // is what keeps that UI from appearing on a surface that couldn't honour it.
+  queued?: string[];
 };
 
 const EMPTY: ChatState = { entries: [], sessionId: null, running: false };
@@ -38,6 +42,9 @@ type Ctx = {
   stop: (type: string) => void;
   clear: (type: string) => void;
   setAutoDrain: (type: string, on: boolean) => void;
+  send: (type: string, message: string) => void;
+  interruptWith: (type: string, message: string) => void;
+  cancelQueued: (type: string, index: number) => void;
 };
 
 const AgentChatsContext = createContext<Ctx | null>(null);
@@ -114,9 +121,16 @@ export default function AgentChatsProvider({ children }: { children: React.React
   const setAutoDrain = useCallback(() => {
     /* no manual mode here — the supervisor always drains; see main.ts */
   }, []);
+  // Steering isn't wired on this surface at all: `agent:start` takes only a type, so there is nowhere
+  // for a message to go. `send` therefore does what start has always done here — nudge the supervisor
+  // — rather than pretending to deliver text it would drop. Queuing follows from that: with no way to
+  // send, there is nothing to hold, so `queued` stays empty and its UI never renders.
+  const send = useCallback((type: string) => void window.landed.agentStart(type), []);
+  const interruptWith = useCallback((type: string) => void window.landed.agentStop(type), []);
+  const cancelQueued = useCallback(() => {}, []);
 
   return (
-    <AgentChatsContext.Provider value={{ get, lastEventAt, open, setOpen, start, stop, clear, setAutoDrain }}>
+    <AgentChatsContext.Provider value={{ get, lastEventAt, open, setOpen, start, stop, clear, setAutoDrain, send, interruptWith, cancelQueued }}>
       {children}
     </AgentChatsContext.Provider>
   );

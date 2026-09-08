@@ -26,6 +26,12 @@ export type ChatState = {
   // set when you manually Stop it, so a stopped agent stays stopped even with items queued. Re-armed
   // by "Work queue" (a bare drain) or the header toggle. Read by AutoWorkController.
   autoDrain?: boolean;
+  // Messages you typed WHILE it was working, waiting their turn. A run is a detached child process
+  // that can't be handed new input mid-flight, so a follow-up can't be injected — it's held here and
+  // sent as a steer the moment the run ends. Deliberately not persisted: a queued message is a live
+  // intention about a run in progress, and silently firing it at a reloaded page hours later would
+  // be worse than losing it.
+  queued?: string[];
 };
 const EMPTY: ChatState = { entries: [], sessionId: null, running: false };
 
@@ -59,6 +65,12 @@ type Ctx = {
   stop: (type: string) => void;
   clear: (type: string) => void;
   setAutoDrain: (type: string, on: boolean) => void; // arm/pause this agent's auto-drain
+  // Send a message, whether or not the agent is busy. Idle → sends now. Busy → queues it and steers
+  // as soon as the run ends, so you never have to wait for a drain to finish before saying something.
+  send: (type: string, message: string) => void;
+  // Same, but don't wait: kill the run and send immediately.
+  interruptWith: (type: string, message: string) => void;
+  cancelQueued: (type: string, index: number) => void;
 };
 
 const AgentChatsContext = createContext<Ctx | null>(null);
@@ -74,6 +86,10 @@ export default function AgentChatsProvider({ children }: { children: React.React
   const [open, setOpen] = useState<string | null>(null);
   const chatsRef = useRef(chats);
   const aborts = useRef<Record<string, AbortController | null>>({});
+  // A run that ends sends whatever you queued while it worked — but the drain is defined after
+  // `start` (it calls it), so `start` reaches back to it through a ref. Only this direction needs
+  // one; everything else can name `start` directly.
+  const drainRef = useRef<(type: string) => void>(() => {});
   const lastEventRef = useRef<Record<string, number>>({}); // last stream-event time per agent (stall detection)
   // One monotonic id source, seeded past any restored history so React keys never collide.
   const idRef = useRef(Object.values(chats).flatMap((c) => c.entries).reduce((m, e) => Math.max(m, e.id), 0));
@@ -261,9 +277,45 @@ export default function AgentChatsProvider({ children }: { children: React.React
       } finally {
         patch(type, (c) => ({ ...c, running: false }));
         aborts.current[type] = null;
+        // Anything typed while this was working goes now. Deferred a tick so `running` has settled
+        // before the drain reads it.
+        setTimeout(() => drainRef.current(type), 150);
       }
     })();
   }, [patch, pushNote, handleEvent]);
+
+  // Send what you typed while the agent was busy, once the run it was busy with is really gone.
+  //
+  // The gate is the SERVER's view of the child process, not our `running` flag. A fresh POST ATTACHES
+  // to a run that's still alive rather than spawning one — and an attach ignores `message` — so
+  // sending a moment too early drops the message silently, which is the one failure this whole
+  // feature must not have.
+  const drainQueued = useCallback(async (type: string) => {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const queued = chatsRef.current[type]?.queued ?? [];
+      if (!queued.length) return;
+      const live = await fetch("/api/agents/live", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type, action: "status" }),
+      })
+        .then((r) => r.json())
+        .then((d: { live?: boolean }) => !!d.live)
+        .catch(() => false); // can't ask → assume clear rather than stranding the message forever
+      if (!live && !chatsRef.current[type]?.running) {
+        // Several follow-ups typed in a row are one steer, in the order you typed them — resuming
+        // once per message would make the agent answer them out of context.
+        const message = queued.join("\n\n");
+        patch(type, (c) => ({ ...c, queued: [] }));
+        start(type, message);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    pushNote(type, "your queued message wasn't sent — the previous run is still going. Stop it, then send again.", true);
+  }, [patch, pushNote, start]);
+
+  useEffect(() => { drainRef.current = drainQueued; }, [drainQueued]);
 
   // Abort the stream AND force `running` false + clear the controller immediately — don't rely solely
   // on the fetch's `finally` (a wedged/already-dead stream might never reach it, leaving Stop stuck and
@@ -279,9 +331,32 @@ export default function AgentChatsProvider({ children }: { children: React.React
     patch(type, (c) => ({ ...c, running: false, autoDrain: false }));
   }, [patch]);
 
+  // The composer's one entry point: say something whether or not the agent is busy. Idle → it goes
+  // straight out. Busy → it waits in `queued` and is steered in the moment the run ends, so a long
+  // drain never means you have to sit and watch for your turn.
+  const send = useCallback((type: string, message: string) => {
+    const m = message.trim();
+    if (!m) return;
+    if (!chatsRef.current[type]?.running) { start(type, m); return; }
+    patch(type, (c) => ({ ...c, queued: [...(c.queued ?? []), m] }));
+  }, [patch, start]);
+
+  const cancelQueued = useCallback((type: string, index: number) => {
+    patch(type, (c) => ({ ...c, queued: (c.queued ?? []).filter((_, i) => i !== index) }));
+  }, [patch]);
+
   const setAutoDrain = useCallback((type: string, on: boolean) => {
     patch(type, (c) => ({ ...c, autoDrain: on }));
   }, [patch]);
+
+  // Don't wait your turn: queue it the normal way, then end the run it was waiting on. Stopping is
+  // what triggers the drain, so the message rides out on exactly the path a patient one would —
+  // there's no second delivery route to keep in step with the first.
+  const interruptWith = useCallback((type: string, message: string) => {
+    const wasRunning = !!chatsRef.current[type]?.running;
+    send(type, message);
+    if (wasRunning) stop(type);
+  }, [send, stop]);
 
   const clear = useCallback((type: string) => {
     aborts.current[type]?.abort();
@@ -297,7 +372,7 @@ export default function AgentChatsProvider({ children }: { children: React.React
   const lastEventAt = useCallback((type: string) => lastEventRef.current[type], []);
 
   return (
-    <AgentChatsContext.Provider value={{ get, lastEventAt, open, setOpen, start, stop, clear, setAutoDrain }}>
+    <AgentChatsContext.Provider value={{ get, lastEventAt, open, setOpen, start, stop, clear, setAutoDrain, send, interruptWith, cancelQueued }}>
       {children}
     </AgentChatsContext.Provider>
   );

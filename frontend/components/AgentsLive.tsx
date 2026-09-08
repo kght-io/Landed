@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, ChevronRight, Loader2, Play, Square, Send, Wrench, CheckCircle2, AlertCircle, Eraser, BookOpen, X, Trash2 } from "lucide-react";
+import { Bot, ChevronRight, Clock, Loader2, Play, Square, Send, Wrench, CheckCircle2, AlertCircle, Eraser, BookOpen, X, Trash2 } from "lucide-react";
 import { useAgentQueue, QUEUE_CLEARED_EVENT } from "@/components/AgentQueueProvider";
 import { agentColor } from "@/components/jobMeta";
 import { ago } from "@landed/shared/format/time";
@@ -310,8 +310,8 @@ function WorkQueueButton({ type, disabled }: { type: string; disabled?: boolean 
 }
 
 function LiveAgentChat({ type, backlog }: { type: string; backlog: number }) {
-  const { get, start, stop, lastEventAt } = useAgentChats();
-  const { entries, running } = get(type);
+  const { get, start, stop, send, interruptWith, cancelQueued, lastEventAt } = useAgentChats();
+  const { entries, running, queued } = get(type);
   const [input, setInput] = useState("");
   // Stall counter: seconds since the run last emitted anything (it auto-stops at 5 min — see the
   // route). Computed in a timer (not during render, to stay lint-pure); the tick also keeps the
@@ -359,20 +359,28 @@ function LiveAgentChat({ type, backlog }: { type: string; backlog: number }) {
     prevRunningRef.current = running;
   }, [running, type, get]);
 
-  const submit = () => {
+  const submit = (now = false) => {
     const m = input.trim();
-    if (m && !running) {
+    if (m) {
       window.pendo?.trackAgent("prompt", {
         agentId: "jWe0OBiRjOpN1pzlG5ElbI1IOE0",
         conversationId: get(type).sessionId || type,
         messageId: crypto.randomUUID(),
         content: m,
       });
-      setInput(""); stickRef.current = true; start(type, m);
+      setInput(""); stickRef.current = true;
+      // `send` handles both cases: straight out when idle, queued for the end of the run when busy.
+      if (now) interruptWith(type, m); else send(type, m);
     }
   };
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    // Enter sends (or queues). Cmd/Ctrl+Enter cuts the run short and sends now. Escape is Stop, the
+    // way it is in the terminal — but only when there's nothing typed, so it can still clear a draft.
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e.metaKey || e.ctrlKey); }
+    else if (e.key === "Escape") {
+      if (input) setInput("");
+      else if (running) { e.preventDefault(); stop(type); }
+    }
   };
 
   return (
@@ -394,34 +402,60 @@ function LiveAgentChat({ type, backlog }: { type: string; backlog: number }) {
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 border-t border-zinc-800/60 px-3 py-2">
+      <div className="shrink-0 border-t border-zinc-800/60 px-3 py-2">
+        {/* What you typed while it was working. It goes out the moment the run ends — until then you
+            can take it back, which is the whole reason it's shown rather than silently held. */}
+        {!!queued?.length && (
+          <ul className="mb-2 space-y-1">
+            {queued.map((q, i) => (
+              <li key={i} className="flex items-start gap-2 rounded-lg bg-sky-500/10 px-2.5 py-1.5 text-[12px] text-sky-200/90 ring-1 ring-inset ring-sky-500/20">
+                <Clock size={12} className="mt-0.5 shrink-0 text-sky-300/70" />
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{q}</span>
+                <button
+                  onClick={() => cancelQueued(type, i)}
+                  title="Don't send this"
+                  className="shrink-0 rounded p-0.5 text-sky-300/60 transition hover:bg-sky-500/15 hover:text-sky-200"
+                >
+                  <X size={12} />
+                </button>
+              </li>
+            ))}
+            <li className="px-1 text-[11px] text-zinc-500">
+              sends when this run finishes · <button onClick={() => stop(type)} className="underline decoration-dotted hover:text-zinc-300">stop now</button> to send it immediately
+            </li>
+          </ul>
+        )}
+        <div className="flex items-center gap-2">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}
           rows={1}
-          placeholder={`Message the ${personaFor(type)}…`}
+          placeholder={running ? "Type — it'll send when this finishes…" : `Message the ${personaFor(type)}…`}
           className="max-h-28 min-w-0 flex-1 resize-none rounded-xl bg-zinc-900 px-3 py-2 text-[13px] text-zinc-100 outline-none ring-1 ring-inset ring-zinc-800 placeholder:text-zinc-600 focus:ring-sky-500/40"
         />
         {/* Always-visible run/stop control (the side queue panel is hidden on narrow screens, so the
-            Stop must live here too): Stop while running · Send when you've typed · Work-queue when idle. */}
-        {running ? (
+            Stop must live here too). While running you get BOTH: Stop, and — once you've typed —
+            Send, because waiting for a long drain to finish before you can say anything is the thing
+            this is meant to fix. */}
+        {running && (
           <button
             onClick={() => stop(type)}
-            title="Stop the agent"
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-rose-600 px-3 text-[12px] font-medium text-white transition hover:bg-rose-500"
+            title="Stop the agent (Esc)"
+            className={`flex h-9 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white transition hover:bg-rose-500 ${input.trim() ? "w-9" : "gap-1.5 px-3 text-[12px] font-medium"}`}
           >
-            <Square size={13} /> Stop
+            <Square size={13} /> {!input.trim() && "Stop"}
           </button>
-        ) : input.trim() ? (
+        )}
+        {input.trim() ? (
           <button
-            onClick={submit}
-            title="Send"
+            onClick={() => submit()}
+            title={running ? "Queue this — sends when the run finishes (⌘⏎ to interrupt and send now)" : "Send"}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white transition hover:bg-sky-500"
           >
-            <Send size={15} />
+            {running ? <Clock size={15} /> : <Send size={15} />}
           </button>
-        ) : (
+        ) : !running ? (
           <button
             onClick={() => start(type)}
             title="Work the queue"
@@ -429,8 +463,9 @@ function LiveAgentChat({ type, backlog }: { type: string; backlog: number }) {
           >
             <Play size={13} /> Work queue
           </button>
-        )}
+        ) : null}
         {/* Reset lives on the card row next to the context meter (always visible) — no duplicate here. */}
+        </div>
       </div>
     </div>
   );

@@ -312,7 +312,7 @@ test("a waiting agent sees a job freed by the heartbeat, without waiting out the
 });
 
 test("sweepQueue reports what it actioned and is safe to call when there is nothing to do", () => {
-  assert.deepEqual(sweepQueue(), { reaped: 0, fitRequeued: 0, tailoringRequeued: 0 });
+  assert.deepEqual(sweepQueue(), { reaped: 0, fitRequeued: 0, tailoringRequeued: 0, scansQueued: 0 });
 
   const id = fit("fit-sweep-count");
   claimJob(id, "agent-A", seedThread("th-sweep", 20));

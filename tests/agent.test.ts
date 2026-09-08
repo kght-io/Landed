@@ -12,6 +12,10 @@ const find = (company: string, role?: string) =>
 
 beforeEach(() => reset());
 
+// A minimal readable ladder map. The scan enqueue maps before it scans, so a fixture that wants to
+// exercise the SCAN path has to start already mapped.
+const LADDER_JSON = JSON.stringify({ rungs: [{ rung: "L6", titles: ["Senior Software Engineer"], bands: ["senior"] }], source: "model+search", reason: "seeded for tests" });
+
 const stateOf = (id: number) => db.select().from(postings).where(eq(postings.id, id)).get()!.state;
 // ALL postings for Reddit (any stage) — listPostings is tracker-only, so query the table directly.
 const redditRows = () => {
@@ -475,10 +479,14 @@ test("addComment/deleteComment append + remove a posting's personal comment thre
 test("queueStaleWatchlistScans queues only stale, watchlisted companies — idempotently", () => {
   const old = new Date(Date.now() - 5 * 86_400_000).toISOString();
   const fresh = new Date().toISOString();
-  db.insert(companies).values({ name: "FreshCo", tier: "tier3", watchlist: true, lastScrapedAt: fresh }).run();
-  db.insert(companies).values({ name: "StaleCo", tier: "tier3", watchlist: true, lastScrapedAt: old }).run();
-  db.insert(companies).values({ name: "NeverCo", tier: "tier3", watchlist: true, lastScrapedAt: null }).run();
-  db.insert(companies).values({ name: "OffWL", tier: "tier3", watchlist: false, lastScrapedAt: old }).run();
+  // Mapped, because the enqueue maps before it scans — an unmapped company is queued for a ladder
+  // map instead, which is its own test (tests/scan-needs-ladder.test.ts). This one is about
+  // staleness and idempotency, so it starts past that gate.
+  const ladder = LADDER_JSON;
+  db.insert(companies).values({ name: "FreshCo", tier: "tier3", watchlist: true, lastScrapedAt: fresh, ladderMap: ladder }).run();
+  db.insert(companies).values({ name: "StaleCo", tier: "tier3", watchlist: true, lastScrapedAt: old, ladderMap: ladder }).run();
+  db.insert(companies).values({ name: "NeverCo", tier: "tier3", watchlist: true, lastScrapedAt: null, ladderMap: ladder }).run();
+  db.insert(companies).values({ name: "OffWL", tier: "tier3", watchlist: false, lastScrapedAt: old, ladderMap: ladder }).run();
 
   const r = queueStaleWatchlistScans(3);
   assert.equal(r.queued, 2); // StaleCo + NeverCo (FreshCo recent, OffWL not watchlisted)
@@ -496,7 +504,7 @@ test("queueStaleWatchlistScans queues only stale, watchlisted companies — idem
 // never ran. submitJobResult used to stamp anyway, which marked a company scraped that wasn't, and
 // hid a broken board behind a fresh-looking timestamp.
 test("closing a watchlist-scan job does NOT stamp lastScrapedAt — only a real scan does", () => {
-  db.insert(companies).values({ name: "ScanMe", tier: "tier3", watchlist: true, lastScrapedAt: null }).run();
+  db.insert(companies).values({ name: "ScanMe", tier: "tier3", watchlist: true, lastScrapedAt: null, ladderMap: LADDER_JSON }).run();
   queueStaleWatchlistScans(3);
   const job = listJobs().find((j) => j.type === "watchlist-scan" && j.params?.company === "ScanMe")!;
   claimJob(job.id, "agent-A"); // submit gate requires a live lease

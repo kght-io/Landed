@@ -97,8 +97,11 @@ export const TOOL_SCHEMAS = [
   {
     name: "getContext",
     description:
-      "Get the read-context to consult before self-initiating a job: `inboxLastSynced` (only " +
-      "fetch mail newer than this watermark).",
+      "Get the read-context to consult before a job: `inboxLastSynced` (only fetch mail newer than " +
+      "this watermark), `profile` (search identity + judgment guidance), `levelingRef`, `paths`, and " +
+      "`fitRubric` — the criteria a fit assessment must return a verdict for. Use the rubric's exact " +
+      "`key`s: a verdict naming anything else is discarded, and `type: \"gate\"` marks the criteria " +
+      "where `unmet` vetoes the whole posting.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -292,13 +295,18 @@ export const TOOL_SCHEMAS = [
   {
     name: "submitGlance",
     description:
-      "Submit your SUPERFICIAL second-pass glance on watchlist-scan candidates — title + location " +
-      "only, NO JD. One object per posting: { company, atsId?, url?, title?, location?, glance }. " +
-      "glance = 'high' (clear senior+ SWE IC match → the app creates a discovered application + a " +
-      "fit job; you fetch the JD when you run that fit job), 'low' (unsure → goes to your review), " +
-      "or 'drop' (not a match → discarded). For api companies pass the `atsId` from scanCompany/" +
-      "scanWatchlist; for careers-get/browser companies you fetched yourself, pass company + url + " +
-      "title (the scanned row is created). Returns counts: {queued, review, discarded, failed}.",
+      "Submit your SUPERFICIAL second-pass glance on watchlist-scan candidates — title + department " +
+      "only, NO JD. One object per posting: { company, atsId?, url?, title?, location?, glance, " +
+      "bands?, rank? }. " +
+      "glance = 'high' (a match worth assessing), 'low' (unsure), or 'drop' (not a match → " +
+      "discarded); high and low BOTH land in the Scan-results tab for the human to triage. " +
+      "`bands` is your LEVEL call, read off the company's ladderMap — give EVERY band it might be, " +
+      "not your best guess, because listing two keeps the posting while picking one can silently " +
+      "delete it. `rank` is your ORDERING within that company's board (1 = read this first); the " +
+      "triage view groups by company and sorts on it, so a whole board should be ranked in one " +
+      "call. For api companies pass the `atsId` from scanCompany/scanWatchlist; for careers-get/" +
+      "browser companies you fetched yourself, pass company + url + title (the scanned row is " +
+      "created). Returns counts: {queued, review, discarded, failed}.",
     inputSchema: {
       type: "object",
       properties: {
@@ -313,6 +321,17 @@ export const TOOL_SCHEMAS = [
               title: { type: "string" },
               location: { type: "string" },
               glance: { type: "string", enum: ["high", "low", "drop"] },
+              bands: {
+                type: "array",
+                items: { type: "string", enum: ["junior", "mid", "senior", "staff", "principal", "distinguished"] },
+                description:
+                  "The seniority band(s) this posting sits in, resolved against the company's ladderMap. Give MORE THAN ONE whenever the ladder is genuinely ambiguous (a bare \"Member of Technical Staff\" that could be senior or staff) — ambiguity recorded here keeps the posting, while collapsing it to one band can drop a role you'd have wanted. Omit if the ladder can't place the title at all; that also keeps it.",
+              },
+              rank: {
+                type: "number",
+                description:
+                  "1-based position within THIS COMPANY's board — 1 is the one to read first. Rank on level fit and how well the role matches my disciplines (see the profile). Rank a company's whole board in one pass, so the numbers mean something relative to each other. Omit rather than guess; an unranked posting simply sorts last.",
+              },
             },
             required: ["company", "glance"],
             additionalProperties: false,
@@ -433,6 +452,40 @@ export const TOOL_SCHEMAS = [
                   },
                 },
                 required: ["source"],
+                additionalProperties: false,
+              },
+              ladderMap: {
+                type: "object",
+                description:
+                  "What this company's rungs MEAN — the mapping the scan's level gate reads. NOT the same as `leveling`: that one is levels.fyi geometry for drawing comparison bars and nothing filters on it. Collected by the `leveling-map` job (see leveling-map.md). State what you know, CONFIRM it with a web search, and record which source won.",
+                properties: {
+                  rungs: {
+                    type: "array",
+                    description: "One entry per IC engineering rung.",
+                    items: {
+                      type: "object",
+                      properties: {
+                        rung: { type: "string", description: "The company's own name for the rung, e.g. \"L6\", \"E5\", \"MTS\"." },
+                        titles: {
+                          type: "array",
+                          items: { type: "string" },
+                          description: "The titles this rung actually appears under IN POSTINGS, e.g. [\"Senior Software Development Engineer\", \"Senior SDE\"]. This is the join key — the scan only ever sees a title, never a rung name. Matching is by containment, so give the bare title without team suffixes.",
+                        },
+                        bands: {
+                          type: "array",
+                          items: { type: "string", enum: ["junior", "mid", "senior", "staff", "principal", "distinguished"] },
+                          description: "Every band this rung might be. Usually one. Give BOTH (or more) when sources disagree — e.g. a bare \"Member of Technical Staff\" that could be senior or staff. Ambiguity recorded here WIDENS the gate and never drops a posting, so do not pick one to look decisive.",
+                        },
+                      },
+                      required: ["rung", "titles", "bands"],
+                      additionalProperties: false,
+                    },
+                  },
+                  source: { type: "string", enum: ["model", "search", "model+search"], description: "'model' = recalled only, nothing confirmed it; 'search' = the web contradicted what you recalled and won; 'model+search' = confirmed." },
+                  reason: { type: "string", description: "Why this mapping, naming what confirmed it. REQUIRED — there is no ground truth behind a ladder, so the reasoning is the artifact: without it a wrong mapping can't be told from a right one. A map with no reason is discarded." },
+                  checkedAt: { type: "string", description: "ISO timestamp of when you checked. Defaults to now." },
+                },
+                required: ["rungs", "reason"],
                 additionalProperties: false,
               },
               notes: { type: "string", description: "Freeform notes (e.g. \"quant; flat IC titles\")." },

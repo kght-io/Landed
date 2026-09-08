@@ -12,6 +12,10 @@ import { canonical, norm } from "@landed/shared/agents/canonical";
 import { getProfile } from "../db/profile";
 import { isCompanyCooling } from "../db/cooldown";
 import { NON_ENG } from "@landed/shared/jobs/exclude";
+// stripHtml lives in `shared` so the triage panel can reuse its entity decoding to repair JDs that
+// were stored before the double-decode fix — without re-scanning every board.
+import { stripHtml } from "@landed/shared/jobs/jd";
+import { coerceLadderMap, type LadderMap } from "@landed/shared/config/ladder";
 
 export type ScannedJob = {
   company: string;
@@ -38,6 +42,10 @@ export type ScanResult = {
   fetchMethod?: string | null;
   careersUrl?: string | null;
   fetchRecipe?: string | null;
+  // The company's rung → seniority mapping (stage 2a), handed over WITH the shortlist so the glance
+  // can make a level call without a second lookup. null = never researched, which is not the same as
+  // an empty ladder: the glance must treat "no map" as "keep, I can't judge level here".
+  ladderMap?: LadderMap | null;
   error?: string;
 };
 
@@ -54,64 +62,17 @@ async function getJSON(url: string): Promise<Record<string, unknown>> {
   }
 }
 
-function stripHtml(html?: string | null): string | null {
-  if (!html) return null;
-  // Greenhouse `content` is entity-encoded HTML. (1) reveal structure, (2) convert block-level tags +
-  // <br> into newlines and <li> into bullets so paragraphs/lists SURVIVE as plain text (the JD popup
-  // renders them with whitespace-pre-wrap), (3) strip the remaining inline tags with a quote-aware
-  // regex so a `>` inside a quoted attribute (e.g. class="[&>p]:mb-2") doesn't end a tag early,
-  // (4) decode text-level entities (&amp; last), (5) collapse spaces but KEEP newlines.
-  let s = html.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
-  s = s
-    .replace(/<\s*br\s*\/?>/gi, "\n")
-    .replace(/<\s*li[^>]*>/gi, "\n• ")
-    .replace(/<\s*\/\s*(?:p|div|ul|ol|h[1-6]|tr|section|header|footer|blockquote)\s*>/gi, "\n")
-    .replace(/<\s*(?:p|div|h[1-6]|tr|section|ul|ol)[^>]*>/gi, "\n");
-  s = s.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, " ");
-  s = s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-    .replace(/&amp;/g, "&")
-    .replace(/[ \t]+/g, " ") // collapse runs of spaces/tabs — but NOT newlines
-    .replace(/ *\n */g, "\n") // trim spaces hugging a newline
-    .replace(/\n{3,}/g, "\n\n") // cap blank-line runs
-    .trim();
-  return s ? s.slice(0, 12000) : null;
-}
-
 const chunk = <T>(arr: T[], n: number): T[][] => {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
   return out;
 };
-const safeArr = (raw?: string | null): string[] => {
-  if (!raw) return [];
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
-  }
-};
 
 // --- lenient mechanical filter (coarse pre-filter; the agent's glance is the real one) -------
-const TITLE_SYNONYMS: Record<string, string[]> = {
-  senior: ["senior", "sr."],
-  staff: ["staff"],
-  principal: ["principal", "prin "],
-  lead: ["lead"],
-};
-function titleTokens(titles: string[]): string[] {
-  const out = new Set<string>();
-  for (const t of titles) {
-    const k = t.toLowerCase().trim();
-    if (!k) continue;
-    out.add(k);
-    for (const [base, syns] of Object.entries(TITLE_SYNONYMS)) if (k.includes(base)) syns.forEach((s) => out.add(s));
-  }
-  return [...out];
-}
+// The title-token machinery that used to live here (TITLE_SYNONYMS / titleTokens / matchesTitle /
+// isQuant, plus the ENG_POS_TITLE + ENG_DEPT discipline check) is GONE, not disabled. Seniority and
+// discipline are stage-2 judgments now — see classifyJob's note — and a dead code path that still
+// compiles is an invitation to wire it back up by accident.
 const LOC_ALIASES: Record<string, string[]> = {
   nyc: ["new york", "nyc", "ny "],
   "new york": ["new york", "nyc", "ny "],
@@ -129,22 +90,8 @@ function locTokens(loc: string): string[] {
   }
   return [...out];
 }
-const isQuant = (notes?: string | null) => !!notes && /quant|flat ic/i.test(notes);
-
-// Discipline = SOFTWARE engineering. A "Senior" match isn't enough (pulled in CSM/Designer/
-// Treasury), and the bare word "engineer" is too broad — it lets in Solutions/Sales/Field/
-// Forward-Deployed "Engineers" and Solutions Architects, which are GTM, not SWE. So:
-//   keep if (positive SWE title OR an Engineering department) AND no non-eng signal.
-const ENG_POS_TITLE =
-  /\b(software engineer|software develop|backend|back[- ]end|frontend|front[- ]end|full[- ]?stack|infrastructure engineer|platform engineer|systems engineer|security engineer|data engineer|machine learning|ml engineer|distributed systems|site reliability|sre|devops|member of technical staff)\b|\bmts\b/i;
-const ENG_DEPT = /\bengineering\b|software|infrastructure|\bplatform\b|technical staff/i;
-// Excluders: GTM / field / non-eng orgs that often carry "engineer"/"architect" in the title.
-// NON_ENG (the exclude filter) is shared with applyGlance — see shared/src/jobs/exclude.ts.
-function matchesTitle(title: string, tokens: string[], quant: boolean): boolean {
-  if (quant || tokens.length === 0) return true; // quants: filter by firm, not title level
-  const t = title.toLowerCase();
-  return tokens.some((tok) => t.includes(tok));
-}
+// NON_ENG (the exclude filter) is shared with applyGlance — see shared/src/jobs/exclude.ts — so
+// every fetch method gets the same non-engineering floor whether the app or the agent read the board.
 // Non-US locales that otherwise sneak past a "remote" token ("Toronto, CAN-Remote",
 // "Remote in Canada", "Remote - United Kingdom"), and the US signals that re-allow a
 // dual posting ("Remote - US/Canada", "NYC or Remote (US/Canada)").
@@ -173,6 +120,17 @@ function locFilter(): { lTok: string[]; usOnly: boolean } {
   const lTok = loc ? locTokens(loc) : [];
   const usOnly = !(loc && NON_US.test(loc) && !US_SIGNAL.test(loc));
   return { lTok, usOnly };
+}
+
+// The stored ladder map, or null. Unreadable JSON is indistinguishable from absent — both mean the
+// glance has nothing to judge level against, and both must read as "keep".
+function readLadderMap(raw: string | null): LadderMap | null {
+  if (!raw) return null;
+  try {
+    return coerceLadderMap(JSON.parse(raw));
+  } catch {
+    return null;
+  }
 }
 
 // Drop rows from the Filtered / Discarded archive piles whose location is outside the target. We
@@ -258,21 +216,32 @@ async function listAshby(slug: string, company: string): Promise<ScannedJob[]> {
   });
 }
 
-// Per-job verdict for the scan store: the FIRST gate it fails, else "kept". The discipline
-// check is split by CONFIDENCE: "excluded" = matched a clear non-eng term (Accountant, Sales,
-// Manager…) → high-confidence drop; "unmatched" = no positive SWE signal but nothing said it's
-// non-eng either → LOW-confidence (likely-false-negative, e.g. "AI Research Engineer").
-// Confidence per reason: excluded/location/dedup = high; unmatched/level = low.
-type ScanReason = "kept" | "excluded" | "unmatched" | "location" | "level" | "dedup";
+// Per-job verdict for the scan store: the FIRST gate it fails, else "kept".
+//
+// Stage 1 of the cascade, and ONLY the decisions a regex over a title can actually make with
+// confidence. Two former gates were removed here rather than tuned:
+//
+//   `level`     — a substring match against the company's `targetTitles`, a list written once at
+//                 add-time and never revisited, so its strictness was arbitrary. Airbnb's
+//                 ["Senior"] dropped every Staff role; Anthropic's dropped every unlevelled title;
+//                 Jane Street's empty list filtered nothing at all. 150 postings died there in four
+//                 weeks. Seniority is now judged at 2b, which has the company's rung mapping
+//                 (ladder_map) instead of a word list.
+//   `unmatched` — "no positive SWE signal" is the ABSENCE of evidence, not evidence of a bad role.
+//                 It caught "AI Research Engineer" and "Performance Engineer" as readily as junk.
+//                 Those now reach 2c and get ranked low, which is observable; a drop isn't.
+//
+// What stayed is what a title can settle: a clear non-eng term, a location outside the target, and a
+// posting already tracked as an application. NON_ENG alone carries 1207 of the drops — moving it
+// would have flooded the agent with sales roles for no recall gain.
+type ScanReason = "kept" | "excluded" | "location" | "dedup";
 function classifyJob(
   j: ScannedJob,
-  o: { tTok: string[]; lTok: string[]; usOnly: boolean; quant: boolean; roleSet: Set<string>; urlSet: Set<string> }
+  o: { lTok: string[]; usOnly: boolean; roleSet: Set<string>; urlSet: Set<string> }
 ): ScanReason {
   const hay = `${j.title} ${j.department ?? ""}`;
   if (NON_ENG.test(hay)) return "excluded"; // clearly non-eng → confident drop
   if (!matchesLocation(j.location, o.lTok, o.usOnly)) return "location";
-  if (!matchesTitle(j.title, o.tTok, o.quant)) return "level";
-  if (!(ENG_POS_TITLE.test(j.title) || (j.department && ENG_DEPT.test(j.department)))) return "unmatched"; // unrecognized → review
   if (o.roleSet.has(norm(j.title)) || (j.url && o.urlSet.has(j.url))) return "dedup"; // already a tracked application
   return "kept";
 }
@@ -305,8 +274,12 @@ function persistScan(companyId: number, verdicts: { j: ScannedJob; reason: ScanR
         : reason === "dedup" ? "applied" : reason === "kept" ? "matched" : "filtered") as "filtered" | "matched" | "review" | "dismissed" | "fit_queue" | "assessed" | "apply_later" | "tailoring" | "tailored" | "applied";
       const verdict = (reason === "kept" ? "kept" : "dropped") as "kept" | "dropped";
       const reasonVal = reason === "kept" ? null : reason;
+      // `discoveredAt` is in `values` but deliberately NOT in the conflict `set`: it is the
+      // FIRST-seen stamp, so only an insert may write it. `scannedAt` is the opposite — refreshed
+      // every pass, which is why it records the last scan and can't order a board by age. The eval
+      // needs first-seen to reconstruct what was on a company's board when.
       tx.insert(postings)
-        .values({ companyId, atsId: j.atsId, title: j.title, location: j.location, url: j.url, department: j.department, verdict, reason: reasonVal, state, scannedAt: at, postedAt: j.updatedAt })
+        .values({ companyId, atsId: j.atsId, title: j.title, location: j.location, url: j.url, department: j.department, verdict, reason: reasonVal, state, scannedAt: at, discoveredAt: at, postedAt: j.updatedAt })
         .onConflictDoUpdate({
           target: [postings.companyId, postings.atsId],
           set: { title: j.title, location: j.location, url: j.url, department: j.department, verdict, reason: reasonVal, state, scannedAt: at, postedAt: j.updatedAt },
@@ -348,10 +321,8 @@ export async function scanCompany(name: string, withJd = true): Promise<ScanResu
     const jobs = isGh ? await listGreenhouse(co.slug!, co.name) : await listAshby(co.slug!, co.name);
     const fetched = jobs.length;
 
-    // filter by the company's own criteria
-    const tTok = titleTokens(safeArr(co.targetTitles));
     const { lTok, usOnly } = locFilter();
-    const quant = isQuant(co.notes);
+    const ladderMap = readLadderMap(co.ladderMap);
 
     // This company's existing postings — one fetch drives prior-state preservation, application
     // dedup, and re-post dedup.
@@ -372,7 +343,7 @@ export async function scanCompany(name: string, withJd = true): Promise<ScanResu
     const seenRoles = new Set(seen.map((r) => norm(r.title ?? "")));
     const seenUrls = new Set(seen.map((r) => r.url).filter(Boolean) as string[]);
 
-    const verdicts = jobs.map((j) => ({ j, reason: classifyJob(j, { tTok, lTok, usOnly, quant, roleSet, urlSet }) }));
+    const verdicts = jobs.map((j) => ({ j, reason: classifyJob(j, { lTok, usOnly, roleSet, urlSet }) }));
     persistScan(co.id, verdicts, prior, seenRoles, seenUrls);
     // Non-local roles are never filed (persistScan skips the "location" reason); also clear any that
     // lingered in this company's Filtered / Discarded piles from before this rule (or now off the feed).
@@ -396,7 +367,7 @@ export async function scanCompany(name: string, withJd = true): Promise<ScanResu
     }
 
     db.update(companies).set({ lastScrapedAt: new Date().toISOString() }).where(eq(companies.id, co.id)).run();
-    return { company: co.name, ats: co.ats ?? null, status: "ok", fetched, matched, duplicates };
+    return { company: co.name, ats: co.ats ?? null, status: "ok", fetched, matched, duplicates, ladderMap };
   } catch (e) {
     return { company: co.name, ats: co.ats ?? null, status: "error", fetched: 0, matched: [], duplicates: 0, error: String((e as Error)?.message ?? e) };
   }

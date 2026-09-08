@@ -23,6 +23,7 @@ export * from "./wait";
 export * from "./context";
 export * from "./enqueue/inbox";
 export * from "./enqueue/watchlist";
+export * from "./enqueue/leveling-map";
 export * from "./enqueue/fit";
 export * from "./enqueue/tailoring";
 export * from "./enqueue/prep";

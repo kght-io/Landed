@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, real } from "drizzle-orm/sqlite-core";
 import {
   POSTING_STATES, POSTING_VERDICTS, POSTING_CHANNELS, COMPANY_TIERS,
   PENDING_KINDS, PENDING_STATUSES, PROMPT_FEATURES,
@@ -32,6 +32,11 @@ export const companies = sqliteTable("companies", {
   targetTitles: text("target_titles"), // JSON string[] of titles to target, e.g. ["Senior","Staff"]
   targetLocation: text("target_location"), // e.g. "NYC|remote"
   leveling: text("leveling"), // JSON {source,ladder} — levels.fyi ladder on the shared 1–10 reference scale
+  // JSON LadderMap (shared/src/config/ladder.ts) — what this company's rungs MEAN: posting titles →
+  // seniority band, plus why we believe it. Deliberately separate from `leveling`: that one is
+  // levels.fyi geometry for drawing the popover bars and nothing filters on it, while this is what
+  // the scan's level gate reads. Null = not researched yet.
+  ladderMap: text("ladder_map"),
   lastScrapedAt: text("last_scraped_at"), // ISO; stamped when discovery surfaces a posting for this company
   // Discovery auto-scans ONLY watchlisted companies (scanning is expensive). Orthogonal to
   // tier — tier is for tagging/categorization; watchlist is "scan this for new postings".
@@ -417,6 +422,20 @@ export const postings = sqliteTable("postings", {
   // baseline cohort), or, for the tailor column, never tailored at all.
   fitPromptVersionId: integer("fit_prompt_version_id"),
   tailorPromptVersionId: integer("tailor_prompt_version_id"),
+  // Why YOU discarded this — stack | domain | level | company | other (shared/src/jobs/dismiss.ts).
+  // Distinct from `reason` above, which records why the mechanical pre-filter dropped a row: this
+  // one is a human judgment the filter could not make, and it is the supervised label the scan eval
+  // scores against. Null = discarded before the chips existed, or never discarded at all.
+  dismissReason: text("dismiss_reason"),
+  // Stage 2 of the scan cascade, written by the agent's glance (title + department only, no JD).
+  //   glanceRank  — 2c: this posting's position within ITS COMPANY's board, 1 = most worth reading.
+  //                 The grouped triage view orders by it. Null = never ranked.
+  //   glanceBands — 2b: JSON string[] of the seniority band(s) the level call resolved. MORE THAN
+  //                 ONE means the gate refused to guess between them and kept the row — that
+  //                 refusal is the "widened" count, and it only exists because it's recorded here.
+  //                 A gate that silently declined to drop can't be told from one that never looked.
+  glanceRank: integer("glance_rank"),
+  glanceBands: text("glance_bands"),
 });
 
 // ── Versioned judgment prompts ──────────────────────────────────────────────────────────────
@@ -443,6 +462,41 @@ export const promptVersions = sqliteTable("prompt_versions", {
   active: integer("active", { mode: "boolean" }).notNull().default(false),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull(),
+});
+
+// ── Agent run telemetry ─────────────────────────────────────────────────────────────────────
+// One row per finished agent run: how long it took, what it spent, and whether it worked.
+//
+// This exists because the run JOURNALS don't keep history — `data/agent-runs/<type>.jsonl` holds one
+// run per agent type and is truncated on the next launch, so without this table the answer to "is
+// tailoring getting slower" is unanswerable by construction. The CLI already emits everything in its
+// final `result` frame; this is where that frame is kept.
+//
+// Keyed by the CLI's own `session_id`, so ingesting the same journal twice is a no-op — which is what
+// makes it safe to ingest both when a run ends and again on a later sweep.
+//
+// NOT the same table as `agent_runs`, which is the reconcile tally (rows inserted/updated per sync).
+// Different question, different grain — hence the distinct name.
+export const agentRunMetrics = sqliteTable("agent_run_metrics", {
+  sessionId: text("session_id").primaryKey(),
+  type: text("type").notNull(), // fit | tailoring | … (from the journal filename)
+  endedAt: text("ended_at").notNull(),
+  ok: integer("ok", { mode: "boolean" }).notNull(),
+  // Why it ended. `completed` is the only success — a killed run or one that burned its turn limit
+  // reports is_error:false, so this column is what separates them.
+  terminalReason: text("terminal_reason"),
+  numTurns: integer("num_turns"),
+  durationApiMs: integer("duration_api_ms"),
+  costUsd: real("cost_usd"),
+  // Split, never summed: a real fit run showed 94 input against 4,139,631 cache-read. One combined
+  // figure would swamp the number that actually varies between runs.
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cacheReadTokens: integer("cache_read_tokens"),
+  cacheCreationTokens: integer("cache_creation_tokens"),
+  thinkingTokens: integer("thinking_tokens"),
+  denials: integer("denials").notNull().default(0), // blocked tool calls — a silent failure mode
+  models: text("models"), // JSON string[] — a run can span Haiku and Opus
 });
 
 // ── Fit labeling / eval set ─────────────────────────────────────────────────────────────────

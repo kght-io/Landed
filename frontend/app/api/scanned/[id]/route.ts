@@ -1,5 +1,6 @@
 import { scannedAction, getPosting, setPostingJd, getPostingJd } from "@landed/backend/db/queries";
 import { createJob, enqueueTailoring, outstandingFitJobId } from "@landed/backend/jobs/store";
+import { DISMISS_REASONS, isDismissReason } from "@landed/shared/jobs/dismiss";
 
 export const dynamic = "force-dynamic";
 
@@ -30,16 +31,21 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   return p ? Response.json({ ok: true, id: n }) : Response.json({ error: "not found" }, { status: 404 });
 }
 
-// POST /api/scanned/:id  body: { action: "discard" | "queue-fit" | "tailor" | "apply" }
-//   Discovery-stage moves: discard → discard pile · queue-fit → fit queue (+ enqueue a fit job;
+// POST /api/scanned/:id  body: { action: "discard" | "queue-fit" | "tailor" | "apply", reason? }
+//   Discovery-stage moves: discard → discard pile · revert → back to triage (undo a discard, which
+//   also clears its reason label) · queue-fit → fit queue (+ enqueue a fit job;
 //   JD fetched from the URL by the agent) · tailor → tailoring · apply → graduate to the tracker
 //   (creates an applications row). (The "apply later" hold is set via the drawer's "Move to" instead.)
-const ACTIONS = ["discard", "queue-fit", "tailor", "apply"] as const;
+//   `reason` applies to discard only — WHY you threw it away, the label the scan eval scores
+//   against. It is OPTIONAL on purpose: a discard must never fail for want of a label. A value that
+//   isn't in the set is rejected outright rather than dropped, so a client typo surfaces here
+//   instead of quietly producing an unlabeled row you'd read as a deliberate skip.
+const ACTIONS = ["discard", "queue-fit", "tailor", "apply", "revert"] as const;
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const n = Number(id);
   if (!Number.isInteger(n)) return Response.json({ error: "bad id" }, { status: 400 });
-  let body: { action?: string; appliedDate?: string; queueOnly?: boolean };
+  let body: { action?: string; appliedDate?: string; queueOnly?: boolean; reason?: string };
   try {
     body = await request.json();
   } catch {
@@ -47,8 +53,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   if (!ACTIONS.includes(body.action as (typeof ACTIONS)[number]))
     return Response.json({ error: `action must be ${ACTIONS.join(" | ")}` }, { status: 400 });
+  if (body.reason !== undefined && !isDismissReason(body.reason))
+    return Response.json({ error: `reason must be ${DISMISS_REASONS.join(" | ")}` }, { status: 400 });
 
-  const r = scannedAction(n, body.action as (typeof ACTIONS)[number], { appliedDate: body.appliedDate, queueOnly: body.queueOnly });
+  const r = scannedAction(n, body.action as (typeof ACTIONS)[number], {
+    appliedDate: body.appliedDate,
+    queueOnly: body.queueOnly,
+    reason: isDismissReason(body.reason) ? body.reason : undefined,
+  });
   if (r.ok && r.fit) {
     // Don't stack a duplicate: if this posting already has an outstanding fit job (from ANY path —
     // e.g. a JD-add via enqueueFit, or an earlier queue-fit), ignore the re-queue and tell the client

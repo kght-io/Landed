@@ -349,6 +349,28 @@ function connection() {
   )`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_fit_verdicts_run ON fit_verdicts(run_id)");
 
+  // Agent run telemetry. The run journals keep ONE run per type and are truncated on the next
+  // launch, so any question about a trend is unanswerable without keeping the result frames here.
+  // Keyed by the CLI's session_id, which makes re-ingesting the same journal a no-op.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS agent_run_metrics (
+    session_id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    terminal_reason TEXT,
+    num_turns INTEGER,
+    duration_api_ms INTEGER,
+    cost_usd REAL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_read_tokens INTEGER,
+    cache_creation_tokens INTEGER,
+    thinking_tokens INTEGER,
+    denials INTEGER NOT NULL DEFAULT 0,
+    models TEXT
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_type ON agent_run_metrics(type, ended_at)");
+
   // Target scrape config + search criteria on companies (the agent curates via upsertCompanies).
   const coCols = new Set(
     (sqlite.prepare("PRAGMA table_info(companies)").all() as { name: string }[]).map((r) => r.name)
@@ -361,6 +383,9 @@ function connection() {
     ["target_titles", "target_titles TEXT"],
     ["target_location", "target_location TEXT"],
     ["leveling", "leveling TEXT"],
+    // JSON LadderMap — posting titles → seniority band for THIS company, plus the reasoning. Read by
+    // the scan's level gate; distinct from `leveling`, which is cosmetic levels.fyi geometry.
+    ["ladder_map", "ladder_map TEXT"],
     ["last_scraped_at", "last_scraped_at TEXT"],
     ["watchlist", "watchlist INTEGER NOT NULL DEFAULT 0"],
     ["cooldown_until", "cooldown_until TEXT"], // YYYY-MM-DD; discovery skips this company until then
@@ -405,6 +430,13 @@ function connection() {
     // callback comparison groups by. Null = ran before versioning (the baseline), or never tailored.
     ["fit_prompt_version_id", "fit_prompt_version_id INTEGER"],
     ["tailor_prompt_version_id", "tailor_prompt_version_id INTEGER"],
+    // Your discard label (stack | domain | level | company | other) — the supervised signal the scan
+    // eval scores against. Not the same as `reason`, which is the pre-filter's own drop verdict.
+    ["dismiss_reason", "dismiss_reason TEXT"],
+    // Stage 2 of the scan cascade: 2c's within-company rank, and 2b's resolved seniority band(s)
+    // (JSON string[] — more than one records an ambiguity the gate refused to resolve).
+    ["glance_rank", "glance_rank INTEGER"],
+    ["glance_bands", "glance_bands TEXT"],
   ] as const) {
     if (!candCols.has(name)) addColumn(sqlite, `ALTER TABLE postings ADD COLUMN ${ddl}`);
   }

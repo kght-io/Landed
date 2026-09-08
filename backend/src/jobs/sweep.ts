@@ -1,10 +1,12 @@
 import { reapStuckJobs } from "./queue";
 import { reconcileFitQueue } from "./enqueue/fit";
 import { reconcileTailoringQueue } from "./enqueue/tailoring";
+import { reconcileMappedScans } from "./enqueue/watchlist";
 
 // ── one tick of the queue's self-healing ──
 // Three things have to happen before the queue can be read or claimed honestly:
 //   • re-assert a job for any fit_queue / tailoring candidate that lost its projection,
+//   • queue the scan for any company whose ladder map has landed (the map → scan transition),
 //   • reap abandoned claims (silent agent or expired lease) so the work is claimable again.
 //
 // This lives here rather than in queue.ts because the reconcilers are per-type (./enqueue/*) and
@@ -18,9 +20,10 @@ import { reconcileTailoringQueue } from "./enqueue/tailoring";
 // long-polling /api/jobs/wait could sit idle for 45 more minutes next to work it was free to take,
 // unless somebody happened to have the app open in a browser. Cheap and idempotent: call it at the
 // top of any path that is about to act on queue state.
-export function sweepQueue(): { reaped: number; fitRequeued: number; tailoringRequeued: number } {
+export function sweepQueue(): { reaped: number; fitRequeued: number; tailoringRequeued: number; scansQueued: number } {
   const fitRequeued = reconcileFitQueue();
   const tailoringRequeued = reconcileTailoringQueue();
+  const scansQueued = reconcileMappedScans();
   const reaped = reapStuckJobs();
-  return { reaped, fitRequeued, tailoringRequeued };
+  return { reaped, fitRequeued, tailoringRequeued, scansQueued };
 }

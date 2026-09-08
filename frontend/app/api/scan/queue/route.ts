@@ -5,6 +5,11 @@ export const dynamic = "force-dynamic";
 // POST /api/scan/queue
 //   body { company: "Stripe" } -> queue a scan for that ONE watchlisted company (the per-row
 //                                 "Scan now" button), ignoring staleness.
+//
+// Either path MAPS BEFORE IT SCANS: a company with no readable `ladder_map` gets a `leveling-map`
+// job instead and is scanned on the next sweep. Scanning first would leave the level gate with
+// nothing to judge against, so the whole board would land in triage unlevelled — and nothing would
+// say why. `mapping` in the response is that hop.
 //   body { staleDays?: number } -> queue a `watchlist-scan` job per watchlisted company not scraped
 //                                 in the last `staleDays` (default 3, or never), skipping any already
 //                                 in the queue (the "Scrape watchlist" button).

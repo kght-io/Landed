@@ -34,6 +34,33 @@ export const JOB_DEFS: Record<JobType, JobDef> = {
       `Collect ${p?.company ?? "a company"}'s levels.fyi IC SWE ladder via the Chrome geometry method and store it with upsertCompanies, per leveling.md.`,
     ingest: noopIngest,
   },
+  // 2a of the scan cascade. Per COMPANY, once, cached — it never sees a posting; it builds the
+  // lookup table the per-posting level gate reads. Split out from the scan itself because a board
+  // can hold 90 postings and researching a ladder 90 times to answer one question is absurd.
+  //
+  // Not to be confused with `leveling` above: that one scrapes levels.fyi geometry to draw the
+  // popover's comparison bars and nothing filters on it. This one is what the gate actually uses.
+  "leveling-map": {
+    type: "leveling-map",
+    title: "Map Company Levels",
+    description: "Work out what a company's rungs mean — posting titles → seniority band, confirmed by search — so the scan can judge level instead of substring-matching titles.",
+    playbook: "leveling-map.md",
+    buildTask: (p) =>
+      `Work out what ${p?.company ?? "a company"}'s IC engineering rungs mean: for each rung, the titles it appears under in real postings and which seniority band(s) it maps to. State what you already know, then CONFIRM it with a web search, and record which source won. Where sources disagree, record BOTH bands rather than picking one. Store it with upsertCompanies' ladderMap, per leveling-map.md.`,
+    ingest: noopIngest, // the agent writes through upsertCompanies, like watchlist-add and leveling
+    // The state machine's edge: mapped → scan. The queue has no dependsOn, so the transition lives
+    // on completion — the moment a company's ladder lands, its scan is queued. That's what makes the
+    // precondition in enqueue/watchlist.ts a hand-off rather than a skipped cycle: you press
+    // "Scrape watchlist" once and the unmapped companies map, then scan, on their own.
+    // The mapped → scan transition is NOT hooked here. The registry is a table the lifecycle reads,
+    // so depending on ./enqueue/* would close a cycle (and the boundary check rejects it, rightly).
+    // It lives in the sweep instead — see reconcileMappedScans in ./enqueue/watchlist.ts, which is
+    // also more robust than an event: a missed transition self-heals on the next tick.
+    // Deliberately NOT a versioned promptFeature (yet). Versioning exists to attribute an OUTCOME to
+    // a prompt, and this job's output is per-company — there's no posting to stamp, and its quality
+    // only becomes visible downstream in how well the level gate and ranker do. Version it when
+    // there's a measurement to serve; a version series nothing can be scored against is bookkeeping.
+  },
   "watchlist-scan": {
     type: "watchlist-scan",
     title: "Scan Watchlist",

@@ -150,11 +150,15 @@ test("setting or clearing a cooldown by hand is recorded in the change log", () 
 // --- what the cooldown actually suppresses ------------------------------------------------------
 
 const far = "2099-01-01"; // comfortably still cooling
+// The scan enqueue maps before it scans; a fixture exercising the scan path starts already mapped.
+const TEST_LADDER = { rungs: [{ rung: "L6", titles: ["Senior Software Engineer"], bands: ["senior"] }], source: "model+search", reason: "seeded for tests" };
 
 test("a cooling company is not queued for a watchlist scan", () => {
   setWatchlist("Google", true);
   setWatchlist("Anthropic", true);
-  upsertCompanies([{ name: "Google", cooldownUntil: far }]);
+  // Both mapped: the enqueue maps before it scans, and this test is about the COOLDOWN suppressing
+  // a scan, not about the ladder precondition.
+  upsertCompanies([{ name: "Google", ladderMap: TEST_LADDER, cooldownUntil: far }, { name: "Anthropic", ladderMap: TEST_LADDER }]);
   const r = queueStaleWatchlistScans();
   assert.deepEqual({ queued: r.queued, cooling: r.cooling }, { queued: 1, cooling: 1 });
   assert.equal(listScannedPostings().length, 0);
@@ -162,7 +166,7 @@ test("a cooling company is not queued for a watchlist scan", () => {
 
 test("a cooldown that has already lapsed does not block a scan", () => {
   setWatchlist("Google", true);
-  upsertCompanies([{ name: "Google", cooldownUntil: "2020-01-01" }]);
+  upsertCompanies([{ name: "Google", ladderMap: TEST_LADDER, cooldownUntil: "2020-01-01" }]);
   assert.deepEqual(queueStaleWatchlistScans().queued, 1);
 });
 

@@ -10,7 +10,10 @@ import { isHiddenWhileCooling } from "@landed/shared/pipeline/cooldown";
 import { parseRedoLog } from "@landed/shared/jobs/redolog";
 import { parseBriefs } from "@landed/shared/jobs/briefs";
 import { isExcludedTitle } from "@landed/shared/jobs/exclude";
+import { isDismissReason, type DismissReason } from "@landed/shared/jobs/dismiss";
 import type { Leveling } from "@landed/shared/config/leveling";
+import { coerceLadderMap, SENIORITY_BANDS, type SeniorityBand } from "@landed/shared/config/ladder";
+import { num } from "@landed/shared/util/coerce";
 import { coerceDesire, type Desire } from "@landed/shared/config/desire";
 import { describeChanges, type DescribedChange, type FieldDiff } from "@landed/shared/format/change";
 import type { Comment, EmailRefs, FitAssessment, InterviewKind, Interviewer, InterviewRound, Posting, RedoTurn, Status, Tier } from "@landed/shared/types";
@@ -482,6 +485,9 @@ export type CompanyInput = {
   titles?: string[] | null; // → target_titles (JSON)
   location?: string | null; // → target_location
   leveling?: Leveling | null; // → leveling (JSON): the company's levels.fyi ladder, Amazon-anchored
+  // → ladder_map (JSON): what this company's rungs mean — posting titles → seniority band, plus the
+  // reasoning. Read by the scan's level gate. Separate from `leveling`, which only draws the popover.
+  ladderMap?: unknown;
   notes?: string | null;
   desire?: Desire | number | null; // 1–5, how much you want them; null clears the tag
   lastScrapedAt?: string | null; // ISO; usually auto-stamped on discovery, but settable here too
@@ -520,6 +526,13 @@ export function upsertCompanies(
     if (t.titles !== undefined) patch.targetTitles = t.titles ? JSON.stringify(t.titles) : null;
     if (t.location !== undefined) patch.targetLocation = t.location;
     if (t.leveling !== undefined) patch.leveling = t.leveling ? JSON.stringify(t.leveling) : null;
+    // Coerced, never trusted: this comes straight off an agent result. A rung with no usable band is
+    // dropped rather than stored degraded — read as a verdict it would drop postings on nonsense —
+    // and a map where nothing survives clears the column instead of half-writing it.
+    if (t.ladderMap !== undefined) {
+      const m = t.ladderMap === null ? null : coerceLadderMap(t.ladderMap);
+      patch.ladderMap = m ? JSON.stringify(m) : null;
+    }
     if (t.lastScrapedAt !== undefined) patch.lastScrapedAt = t.lastScrapedAt;
     // cooldownUntil is deliberately NOT patched here — it's written after the upsert, through
     // setCompanyCooldown, so a hand-set date goes through the same validation and lands the same
@@ -596,6 +609,11 @@ export type ScannedView = {
   postedAt?: string | null;
   fitScore?: number | null; fit?: FitAssessment; resumeDir?: string | null; leveling?: Leveling;
   redoLog?: RedoTurn[]; comments?: Comment[]; pinned?: boolean;
+  // Stage 2's output. `glanceRank` orders a company's board in the triage view (null = never ranked,
+  // which sorts after the ranked rows rather than last-place among them). `glanceBands` is the level
+  // call — more than one band means the ladder was ambiguous and the gate kept the row instead of
+  // guessing, which is worth SHOWING so the widening isn't invisible.
+  glanceRank?: number | null; glanceBands?: string[];
 };
 const parseLeveling = (s: string | null): Leveling | undefined => {
   if (!s) return undefined;
@@ -661,11 +679,14 @@ export function listScannedPostings(f: { company?: string; state?: string } = {}
       fitScore: postings.fitScore, fitDetail: postings.fitDetail, resumeDir: postings.resumeDir,
       redoLog: postings.redoLog, comments: postings.comments, leveling: companies.leveling,
       pinned: postings.pinned,
+      // Stage 2's output — the triage view groups by company and orders on the rank, and shows the
+      // bands so an ambiguous level call is visible rather than silently widening behind the scenes.
+      glanceRank: postings.glanceRank, glanceBands: postings.glanceBands,
     })
     .from(postings)
     .innerJoin(companies, eq(postings.companyId, companies.id))
     .all()
-    .map((p) => ({ ...p, fit: parseFit(p.fitDetail), redoLog: parseRedoLog(p.redoLog), comments: parseComments(p.comments), leveling: parseLeveling(p.leveling) }))
+    .map((p) => ({ ...p, fit: parseFit(p.fitDetail), redoLog: parseRedoLog(p.redoLog), comments: parseComments(p.comments), leveling: parseLeveling(p.leveling), glanceBands: parseStrArray(p.glanceBands) }))
     .filter((p) => (!f.company || p.company === f.company) && (!states || states.has(p.state)))
     .filter((p) => !isHiddenWhileCooling(cooling, p))
     .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
@@ -675,20 +696,40 @@ export function listScannedPostings(f: { company?: string; state?: string } = {}
 // candidate (discovery); apply graduates it into the tracker (creates an postings row).
 export function scannedAction(
   id: number,
-  action: "discard" | "queue-fit" | "tailor" | "apply",
+  action: "discard" | "queue-fit" | "tailor" | "apply" | "revert",
   // apply: the date the user entered/confirmed; defaults to today. queueOnly: hand the work to the agent
   // WITHOUT moving the posting's stage — the queue action is decoupled from status tracking.
-  opts?: { appliedDate?: string; queueOnly?: boolean }
+  // reason: discard only — WHY you threw it away (the supervised label; see shared/src/jobs/dismiss.ts).
+  opts?: { appliedDate?: string; queueOnly?: boolean; reason?: DismissReason }
 ): { ok: boolean; appId?: number; fit?: { id: number; company: string; role: string; url?: string; jd?: string }; tailor?: { id: number; company: string; role: string; url?: string; jd?: string } } {
   const row = db.select().from(postings).where(eq(postings.id, id)).get();
   if (!row) return { ok: false };
   const co = db.select().from(companies).where(eq(companies.id, row.companyId)).get();
   const name = co?.name ?? "?";
   const queueOnly = opts?.queueOnly ?? false;
+  // A dismissal label describes a posting you threw away. The moment it leaves that pile — by any
+  // route — the label stops being true, and leaving it behind would keep a mistake (or a change of
+  // mind) counting as a negative in the eval set against a posting you actually pursued. So every
+  // exit from `dismissed` clears it, not just the explicit revert.
+  if (row.state === "dismissed" && action !== "discard") {
+    db.update(postings).set({ dismissReason: null }).where(eq(postings.id, id)).run();
+  }
 
   if (action === "discard") {
-    db.update(postings).set({ state: "dismissed" }).where(eq(postings.id, id)).run();
-    logEvent({ entity: "company", entityId: row.companyId, action: "update", source: "discovery", summary: `${name} — ${row.title} · discarded` });
+    // Re-validate here rather than trusting the route: this column is what the scan eval groups by,
+    // so one unrecognized string becomes a bucket that silently splits the dataset. An absent or bad
+    // reason simply leaves the label null — a discard must never FAIL for want of a label, or the
+    // 447 historical dismissals and every existing caller would break.
+    const reason = isDismissReason(opts?.reason) ? opts.reason : null;
+    db.update(postings).set({ state: "dismissed", dismissReason: reason }).where(eq(postings.id, id)).run();
+    logEvent({ entity: "company", entityId: row.companyId, action: "update", source: "discovery", summary: `${name} — ${row.title} · discarded${reason ? ` (${reason})` : ""}` });
+    return { ok: true };
+  }
+  // Undo a discard: back to the triage pile it came from, NOT forward into the fit queue. The
+  // distinction matters — reverting a mis-click shouldn't also commit you to assessing the role.
+  if (action === "revert") {
+    db.update(postings).set({ state: "matched", dismissReason: null }).where(eq(postings.id, id)).run();
+    logEvent({ entity: "company", entityId: row.companyId, action: "update", source: "discovery", summary: `${name} — ${row.title} · discard reverted` });
     return { ok: true };
   }
   if (action === "queue-fit") {
@@ -731,6 +772,26 @@ export function scannedAction(
 export type GlanceInput = {
   company: string; atsId?: string | null; url?: string | null; title?: string | null;
   location?: string | null; department?: string | null; glance: "high" | "low" | "drop"; reason?: string | null;
+  // Stage 2 of the cascade. `rank` (2c) is this posting's position within its company's board,
+  // 1 = read this first. `bands` (2b) is the seniority band(s) the level call resolved — give more
+  // than one when the ladder is genuinely ambiguous, which keeps the row instead of guessing.
+  rank?: number | null;
+  bands?: SeniorityBand[] | null;
+};
+
+// A rank the UI can sort on, or nothing. Agent input is untrusted and this column drives ordering:
+// a 0, a negative, or "second" would silently sort to the top of a company's board.
+const coerceRank = (v: unknown): number | null => {
+  const n = num(v);
+  return n !== null && Number.isInteger(n) && n >= 1 ? n : null;
+};
+
+// The resolved band(s), filtered to the known vocabulary. Anything unrecognized drops out rather
+// than poisoning the list — a band nobody can interpret is worse than a shorter list.
+const coerceBands = (v: unknown): string | null => {
+  if (!Array.isArray(v)) return null;
+  const kept = v.filter((b): b is SeniorityBand => typeof b === "string" && (SENIORITY_BANDS as readonly string[]).includes(b));
+  return kept.length ? JSON.stringify(kept) : null;
 };
 export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outcome?: "review" | "discarded" } {
   const c = canonical(v.company);
@@ -768,6 +829,8 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outc
     verdict: (glance === "drop" ? "dropped" : "kept") as "kept" | "dropped",
     reason: cooling ? "cooldown" : excluded ? "excluded" : v.reason ?? null,
     state,
+    glanceRank: coerceRank(v.rank),
+    glanceBands: coerceBands(v.bands),
   };
 
   // Leave anything you've already triaged / queued / applied alone — a re-glance must never pull a

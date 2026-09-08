@@ -5,6 +5,7 @@ import type { PromptFeature } from "../db/enums";
 export type JobType =
   | "watchlist-add"
   | "leveling"
+  | "leveling-map"
   | "watchlist-scan"
   | "inbox-sync"
   | "fit"

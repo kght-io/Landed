@@ -2,14 +2,25 @@
 // so the "@landed/backend/*" imports below bind to the temp DB + temp asset dir.
 import { db } from "@landed/backend/db";
 import {
-  postings, companies, events, interviews, jobs, appConfig, agentRuns, pendingMatches, todos,
-  threads, threadSteps, prepTranscripts, prepEmails, promptVersions,
+  postings, companies, events, interviews, jobs, appConfig, agentRuns, agentRunMetrics, pendingMatches, todos,
+  threads, threadSteps, prepTranscripts, prepEmails, promptVersions, fitCriteria, fitRuns, fitVerdicts,
 } from "@landed/backend/db/schema";
+import nodePath from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Status } from "@landed/shared/types";
 import { listPendingMatches } from "@landed/backend/db/queries";
 import { resolvePendingMatch } from "@landed/backend/agents/reconcile";
 
 export { db, postings, companies, events, jobs, threads, threadSteps };
+
+// The REAL repo, deliberately. setup.ts repoints REPO_ROOT at a temp dir so no test can write or
+// delete live on-disk state — a test that cleared `data/agent-runs/` through repoPath() destroyed
+// every agent run journal, which is why that isolation exists. But some tests legitimately READ repo
+// content (playbooks, fixtures), and they need the real path. Resolved from this file so it doesn't
+// depend on cwd or on the env the isolation just changed.
+export function realRepoPath(...parts: string[]): string {
+  return nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), "..", ...parts);
+}
 
 // Wipe all rows between tests. (The job queue + ledger live in the `jobs` table now —
 // there are no queue/result/context files to clean.)
@@ -17,7 +28,7 @@ export function reset() {
   // Children before parents — interviews FK→postings, postings FK→companies — so FK enforcement
   // (foreign_keys=ON) doesn't reject the deletes once interview rows actually exist.
   // threadSteps before threads for the same reason (by convention — they're linked by id, not an FK).
-  for (const t of [interviews, postings, pendingMatches, events, jobs, agentRuns, appConfig, todos, threadSteps, threads, prepTranscripts, prepEmails, promptVersions]) db.delete(t).run();
+  for (const t of [interviews, postings, pendingMatches, events, jobs, agentRuns, agentRunMetrics, appConfig, todos, threadSteps, threads, prepTranscripts, prepEmails, promptVersions, fitVerdicts, fitRuns, fitCriteria]) db.delete(t).run();
   db.delete(companies).run();
 }
 
@@ -70,8 +81,11 @@ export function seedCandidate(opts: {
   company: string;
   title?: string;
   url?: string;
-  state?: "filtered" | "matched" | "review" | "dismissed" | "fit_queue" | "assessed" | "apply_later" | "tailoring" | "tailored" | "applied";
+  // The full lifecycle, not just the pre-apply half: outcome tests need the tracker states too
+  // (a callback rate can't be exercised without `interview` / `rejected`).
+  state?: "filtered" | "matched" | "review" | "dismissed" | "fit_queue" | "assessed" | "apply_later" | "tailoring" | "tailored" | "applied" | "interview" | "offer" | "accepted" | "rejected" | "ghost" | "withdrawn" | "company_skipped" | "expired";
   verdict?: "kept" | "dropped";
+  reason?: string; // which gate dropped it — what the funnel attributes by
 }): number {
   const existing = db.select().from(companies).all().find((c) => c.name === opts.company);
   const companyId =
@@ -84,6 +98,7 @@ export function seedCandidate(opts: {
       title: opts.title ?? "Engineer",
       url: opts.url ?? null,
       verdict: opts.verdict ?? "kept",
+      reason: opts.reason ?? null,
       state: opts.state ?? "fit_queue",
       scannedAt: "2026-06-01T00:00:00.000Z",
     })

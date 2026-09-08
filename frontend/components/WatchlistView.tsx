@@ -21,8 +21,13 @@ export default function WatchlistView() {
   const loadScan = useCallback(() => {
     fetch("/api/scanned?state=review,matched")
       .then((r) => r.json())
+      // Keep this in step with the `Scanned` type — a field dropped here is silently missing in the
+      // view even though the API returned it, which is how the stage-2 rank went unnoticed (nothing
+      // was ranked yet, so the omission looked identical to having no data).
       .then((d) => setScanRows((d.postings ?? []).map((p: Scanned) => ({
-        id: p.id, company: p.company, title: p.title, location: p.location, scannedAt: p.scannedAt, postedAt: p.postedAt ?? null,
+        id: p.id, company: p.company, title: p.title, location: p.location,
+        url: p.url ?? null, scannedAt: p.scannedAt, postedAt: p.postedAt ?? null,
+        glanceRank: p.glanceRank ?? null, glanceBands: p.glanceBands ?? [],
       }))))
       .catch(() => setScanRows([]));
   }, []);

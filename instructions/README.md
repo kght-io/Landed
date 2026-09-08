@@ -50,7 +50,8 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
 │       │                      each file is named for the round label the user typed
 │       │                      (`recruiter-screen.md`); unlabelled ones fall back to `transcript-N.md`
 │       ├── emails.md        ← DB dump: interviewing emails you capture (input #1) — READ-ONLY
-│       └── attachments/     ← role PDFs / prep guides / take-homes the interview-emails job downloads
+│       ├── attachments/     ← role PDFs / prep guides / take-homes the interview-emails job downloads
+│       └── uploads/         ← files the user attaches in the prep chat; the turn names their paths
 └── resume/
     ├── resume-ref.{docx,pdf}   ← BASE resume — the only source of truth for resume content
     └── <slug>/                 ← one folder per TAILORED resume (the archive)
@@ -70,8 +71,10 @@ team, fit, JD). Notes added to a company's folder during a chat survive re-expor
 `transcripts/*.md` are all **generated from the app database** and overwritten on every refresh —
 read them freely, but **never write them**, because the next export throws your edit away. To change
 what they say, change the DB: submit an `interview-emails` result with `emails` records (below).
-The exception is `attachments/` and `resume/`, which are real files — artifacts, not knowledge — and
-the only things in this tree that exist nowhere else.
+The exception is `attachments/`, `uploads/` and `resume/`, which are real files — artifacts, not
+knowledge — and the only things in this tree that exist nowhere else. A prep-chat turn that says
+"Attached (in this folder — open with Read): uploads/…" is pointing at a file the user just handed
+you: read it with the path as given, relative to the company folder you are already in.
 
 **`interview-prep/GLOBAL/`** holds cross-company material the user maintains by hand (story bank,
 experience corpus, career vault). No job reads or writes it — a per-company prep chat may read up

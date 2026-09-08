@@ -13,8 +13,25 @@
 // `deps` is injected so this is testable without a browser — and so the module stays free of any
 // direct window/node access, which is what lets it live in `shared`.
 
-export type ChatMsg = { role: "user" | "assistant" | "note"; text: string; error?: boolean };
+// A file attached to a turn. `relPath` is relative to the company's prep folder, which is the chat's
+// cwd — see backend/src/prep/uploads.ts for why that's the whole integration.
+export type ChatAttachment = { name: string; relPath: string };
+export type ChatMsg = { role: "user" | "assistant" | "note"; text: string; error?: boolean; attachments?: ChatAttachment[] };
 export type ChatState = { msgs: ChatMsg[]; sid: string | null; busy: boolean };
+
+// What the agent is actually sent when a turn carries attachments.
+//
+// There is no upload channel to the model here: the file is already on disk in the agent's cwd, so
+// the turn just has to NAME it. Paths are relative for that reason — the agent resolves them against
+// the folder it was started in. Attaching with no message still has to say something, or the agent
+// gets a bare file list and has to guess the ask.
+export function withAttachments(message: string, attachments: ChatAttachment[] = []): string {
+  const text = message.trim();
+  if (!attachments.length) return text;
+  const list = attachments.map((a) => a.relPath).join(", ");
+  const ask = text || "Take a look at the attached file(s).";
+  return `${ask}\n\nAttached (in this folder — open with Read): ${list}`;
+}
 
 export type ChatStorage = {
   getItem(key: string): string | null;
@@ -121,13 +138,22 @@ export function resetChat(id: string): void {
 // One turn. The user's message is committed before the request goes out, so it survives even if the
 // tab, the drawer or the browser closes mid-flight; the reply and session id are committed on the way
 // back regardless of whether a component is still mounted to see them.
-export async function sendTurn(id: string, opts: { message: string; context: string; slug: string }): Promise<void> {
+export async function sendTurn(
+  id: string,
+  opts: { message: string; context: string; slug: string; attachments?: ChatAttachment[] }
+): Promise<void> {
   const before = chatState(id);
   if (before.busy) return; // one turn at a time per company — the CLI resumes a session serially
-  update(id, { msgs: [...before.msgs, { role: "user", text: opts.message }], busy: true });
+  const attachments = opts.attachments?.length ? opts.attachments : undefined;
+  // The bubble shows what you TYPED (plus chips for the files); the agent gets the same text with the
+  // paths appended. Storing the composed string instead would put plumbing in your own transcript.
+  update(id, { msgs: [...before.msgs, { role: "user", text: opts.message, attachments }], busy: true });
 
   try {
-    const d = await deps.post({ message: opts.message, sessionId: before.sid, context: opts.context, slug: opts.slug });
+    const d = await deps.post({
+      message: withAttachments(opts.message, attachments ?? []),
+      sessionId: before.sid, context: opts.context, slug: opts.slug,
+    });
     const text = d.reply || d.error || "(no reply)";
     const note: ChatMsg[] = d.recovered
       ? [{ role: "note", text: "↻ The previous session had expired — refreshed it automatically. Your history above is kept here." }]

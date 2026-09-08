@@ -1,10 +1,11 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Bot, Send, Loader2, User, Trash2, PanelRightClose, FileText, Maximize2 } from "lucide-react";
+import { Bot, Send, Loader2, User, Trash2, PanelRightClose, FileText, Maximize2, Paperclip, Image as ImageIcon, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { chatState, sendTurn, resetChat, subscribeChat, EMPTY, type ChatMsg } from "@landed/shared/prep/chat-store";
+import { chatState, sendTurn, resetChat, subscribeChat, EMPTY, type ChatMsg, type ChatAttachment } from "@landed/shared/prep/chat-store";
+import { UPLOAD_ACCEPT, isImageAttachment } from "@landed/shared/prep/attachments";
 
 // A full-height chat with the locked-down interview-prep agent for one company (runs on your
 // subscription; read-only file access to that company's prep folder, no other tools). Designed to
@@ -13,6 +14,30 @@ import { chatState, sendTurn, resetChat, subscribeChat, EMPTY, type ChatMsg } fr
 // turn. The header lists the folder's research .md files so you can see what the coach is reading.
 // `note` = a system line (e.g. "session refreshed") rendered muted + centered, not a chat bubble.
 type CtxFile = { name: string; size: number; mtime: string };
+
+// The picker offers exactly what the server accepts — one list, in shared. The server still
+// validates; this is only the nicer front door.
+const ACCEPT = UPLOAD_ACCEPT.join(",");
+
+// One attachment, as a chip. The same chip in both places it appears — staged in the composer (where
+// it can still be dropped, hence `onRemove`) and settled in the turn above it — so a file doesn't
+// change appearance the moment you send it.
+function FileChip({ file, onRemove }: { file: ChatAttachment; onRemove?: () => void }) {
+  const Icon = isImageAttachment(file.name) ? ImageIcon : FileText;
+  return (
+    <span className={`flex max-w-full items-center gap-1 rounded-lg bg-zinc-800 py-1 text-[12px] text-zinc-300 ring-1 ring-inset ring-zinc-700 ${onRemove ? "pl-2 pr-1" : "px-2"}`}>
+      <Icon size={11} className="shrink-0 text-sky-300" />
+      <span className="truncate">{file.name}</span>
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          title="Don't send this one"
+          className="shrink-0 rounded p-0.5 text-zinc-500 transition hover:bg-zinc-700 hover:text-zinc-200"
+        ><X size={11} /></button>
+      )}
+    </span>
+  );
+}
 
 // One rendered turn, memoized — and the memo is load-bearing, not a micro-optimization. The composer
 // textarea's state lives in PrepChat, so WITHOUT this every keystroke re-rendered the whole
@@ -34,8 +59,14 @@ const Message = memo(function Message({ m }: { m: ChatMsg }) {
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-700 ring-1 ring-zinc-600">
           <User size={12} className="text-zinc-300" />
         </span>
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-sky-600 px-3 py-1.5 text-[13px] leading-relaxed text-white">
-          {m.text}
+        <div className="flex max-w-[85%] flex-col items-end gap-1">
+          {/* Only render the bubble when something was typed — a turn can be attachments alone. */}
+          {m.text.trim() && (
+            <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-sky-600 px-3 py-1.5 text-[13px] leading-relaxed text-white">
+              {m.text}
+            </div>
+          )}
+          {m.attachments?.map((f) => <FileChip key={f.relPath} file={f} />)}
         </div>
       </div>
     );
@@ -96,6 +127,35 @@ export default function PrepChat({
   const [input, setInput] = useState("");
   const [ctxFiles, setCtxFiles] = useState<CtxFile[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Files staged for the NEXT turn. They're uploaded the moment you pick them (so the chip can show
+  // a real saved name and a failure surfaces immediately, not on send), then named in the turn.
+  const [pending, setPending] = useState<ChatAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const attach = useCallback(async (files: FileList | File[] | null) => {
+    const list = [...(files ?? [])];
+    if (!list.length) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      for (const f of list) form.append("file", f);
+      const r = await fetch(`/api/prep/company/${slug}/uploads`, { method: "POST", body: form });
+      const d = await r.json();
+      if (Array.isArray(d.uploads)) setPending((p) => [...p, ...d.uploads]);
+      // A partial success still lands its good files — say what didn't make it rather than
+      // silently dropping it.
+      if (d.error || d.errors?.length)
+        setUploadError(d.errors?.length ? d.errors.map((e: { name: string; error: string }) => `${e.name}: ${e.error}`).join("; ") : String(d.error));
+    } catch {
+      setUploadError("Couldn't attach that file.");
+    } finally {
+      setUploading(false);
+    }
+  }, [slug]);
 
   // Pin to the newest message. `ctxFiles` is a dependency for a layout reason, not a data one: the
   // context-files strip renders above the log a beat after mount (its fetch resolves), growing the
@@ -118,12 +178,15 @@ export default function PrepChat({
 
   const send = () => {
     const text = input.trim();
-    if (!text || busy) return;
+    // Attachments alone are a valid turn — dragging in a screenshot and hitting send is a normal
+    // way to ask "what do you make of this?".
+    if ((!text && !pending.length) || busy || uploading) return;
     pendo.track("prep_chat_message_sent", {
       company_slug: storageId,
       message_length: text.length,
       is_first_message: msgs.length === 0,
       session_active: !!sid,
+      attachment_count: pending.length,
     });
     window.pendo?.trackAgent("prompt", {
       agentId: "rSt-ZD_8KrkEU2tFKqlaoIpAhAw",
@@ -131,10 +194,13 @@ export default function PrepChat({
       messageId: crypto.randomUUID(),
       content: text,
     });
+    const attachments = pending;
     setInput("");
+    setPending([]);
+    setUploadError(null);
     // Deliberately not awaited: the turn belongs to the store and completes on its own, so this
     // component unmounting (a tab switch) can't cancel it.
-    void sendTurn(storageId, { message: text, context, slug });
+    void sendTurn(storageId, { message: text, context, slug, attachments });
   };
 
   const reset = () => resetChat(storageId);
@@ -230,19 +296,61 @@ export default function PrepChat({
         </div>
       </div>
 
-      <div className={`shrink-0 border-t border-zinc-800/60 ${fullscreen ? `${rowPad} py-5` : "px-3 py-2.5"}`}>
+      {/* Drop anywhere on the composer, not just on a target the size of a button. */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); void attach(e.dataTransfer.files); }}
+        className={`shrink-0 border-t transition ${dragging ? "border-sky-500/60 bg-sky-500/5" : "border-zinc-800/60"} ${fullscreen ? `${rowPad} py-5` : "px-3 py-2.5"}`}
+      >
+      {/* Staged files, shown before you send so you can drop one you picked by mistake. They're
+          already on disk at this point — removing a chip just un-names it for this turn. */}
+      {(pending.length > 0 || uploadError) && (
+        <div className={`mb-2 flex flex-wrap items-center gap-1.5 ${col}`}>
+          {pending.map((f) => (
+            <FileChip
+              key={f.relPath}
+              file={f}
+              onRemove={() => setPending((p) => p.filter((x) => x.relPath !== f.relPath))}
+            />
+          ))}
+          {uploadError && <span className="text-[12px] text-rose-300">{uploadError}</span>}
+        </div>
+      )}
       <div className={`flex items-end gap-2 ${col}`}>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept={ACCEPT}
+          className="hidden"
+          onChange={(e) => { void attach(e.target.files); e.target.value = ""; /* re-picking the same file must re-fire */ }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading || busy}
+          title="Attach a photo, PDF or text file for the coach to read"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-400 ring-1 ring-inset ring-zinc-800 transition enabled:hover:text-zinc-100 enabled:hover:ring-zinc-700 disabled:opacity-40"
+        >
+          {uploading ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />}
+        </button>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}
+          // Pasting a screenshot straight from the clipboard is the fastest path here, and the one
+          // people reach for first.
+          onPaste={(e) => {
+            const files = [...e.clipboardData.files];
+            if (files.length) { e.preventDefault(); void attach(files); }
+          }}
           rows={1}
           placeholder={placeholder}
           className="max-h-32 flex-1 resize-none rounded-xl bg-zinc-900 px-3 py-2 text-[13px] text-zinc-100 outline-none ring-1 ring-inset ring-zinc-800 placeholder:text-zinc-600 focus:ring-sky-500/40"
         />
         <button
           onClick={send}
-          disabled={busy || !input.trim()}
+          disabled={busy || uploading || (!input.trim() && !pending.length)}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white transition enabled:hover:bg-sky-500 disabled:opacity-40"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}

@@ -12,5 +12,12 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-test-"));
 process.env.ASSET_ROOT = dir;
 process.env.JOBS_ROOT = path.join(dir, "agent-jobs");
 process.env.DB_PATH = path.join(dir, "test.db");
+// REPO_ROOT too, and this one is not optional. Anything resolved through paths.ts `repoPath()` —
+// notably `data/agent-runs/`, the agent run journals — otherwise points at the REAL repo, and a test
+// that writes or clears those directories destroys live data. That is not hypothetical: a test doing
+// exactly this wiped every journal in data/agent-runs/. The temp dir needs the workspace marker
+// findRepoRoot() looks for, or resolution walks straight back up to the real root.
+fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "landed-test-root", workspaces: [] }));
+process.env.REPO_ROOT = dir;
 
 export const TEST_DIR = dir;

@@ -7,6 +7,7 @@ import { drainPrompt } from "@landed/shared/agents/personas";
 import { translate, type TranslateState } from "@landed/shared/agents/stream";
 import { runPaths, ensureRunDir, splitFrames, isTerminalLine, readLivePid } from "@landed/backend/agents/run-log";
 import { REPO_ROOT } from "@landed/backend/paths";
+import { ingestRun } from "@landed/backend/db/agent-metrics";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 600; // a full queue drain + tool calls can run for minutes
@@ -27,6 +28,8 @@ export const maxDuration = 600; // a full queue drain + tool calls can run for m
 //   (none)   — spawn a fresh run, OR attach to one already live for this type (self-heal after a drop)
 //   "attach" — attach ONLY; if nothing is live, return 204 (used by the client to reconnect a dropped
 //              stream without ever respawning a run that already finished)
+//   "status" — is a run live for this type? `{ live }`, no stream. Used by a queued follow-up to
+//              wait out the old run before steering (a fresh POST would attach, not send).
 //   "stop"   — kill the live run for this type
 //   "clear"  — kill it and delete its journal files (the eraser button)
 //
@@ -62,6 +65,12 @@ export async function POST(request: Request) {
     }
     return Response.json({ ok: true, killed: !!pid });
   }
+
+  // "Is a run still alive?" — the gate a queued follow-up waits on before it steers. A fresh POST
+  // ATTACHES to a live run instead of spawning (see below), which would silently swallow the
+  // message, so the client has to know the old run is really gone before sending the next one.
+  // Cheaper and safer than probing with `attach`, which would open a stream just to close it.
+  if (body.action === "status") return Response.json({ live: !!readLivePid(type) });
 
   const livePid = readLivePid(type);
 
@@ -173,7 +182,14 @@ export async function POST(request: Request) {
           let done = false;
           for (const line of lines) {
             for (const frame of translate(line, state)) send(frame);
-            if (isTerminalLine(line)) done = true;
+            if (isTerminalLine(line)) {
+              // Lift this run's metrics into the table while the journal still holds them — the next
+              // launch of this type truncates the file. Idempotent on the CLI's session_id, so the
+              // dashboard's sweep can safely record the same run again if this path never fires
+              // (nobody attached, or the tab closed mid-run).
+              try { ingestRun(type); } catch { /* telemetry must never break the stream */ }
+              done = true;
+            }
           }
           if (done) { finish(0); return; }
         } else {

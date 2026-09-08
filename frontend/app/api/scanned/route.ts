@@ -1,4 +1,5 @@
 import { listScannedPostings, scannedBucketCounts } from "@landed/backend/db/queries";
+import { scanFunnel } from "@landed/backend/db/pipeline-metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,9 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const q = new URL(request.url).searchParams;
   try {
+    // ?funnel=1 — where postings died on the way here. The half of "how is the scan doing" you
+    // can't get by looking at the list: you can count what's in front of you, not what was removed.
+    if (q.get("funnel")) return Response.json({ funnel: scanFunnel() });
     if (q.get("counts")) {
       const terms = (q.get("q") ?? "").split(",").map((t) => t.trim()).filter(Boolean);
       return Response.json({ counts: scannedBucketCounts(terms) });

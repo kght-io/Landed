@@ -5,12 +5,13 @@ import { BellOff, Bot, Loader2, ChevronRight, FileText, AlertTriangle, RotateCcw
 import { ago } from "@landed/shared/format/time";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import AgentsLive from "@/components/AgentsLive";
-import AgentMonitor, { type MonitorJob } from "@/components/agents/AgentMonitor";
+import AgentHealth, { type MonitorJob } from "@/components/agents/AgentMonitor";
 import Playbook from "@/components/agents/Playbook";
 import TabBar from "@/components/TabBar";
 import McpDocsPanel from "@/components/mcp/McpDocsPanel";
 import { AUTO_WORK_IGNORED_KEY, AUTO_WORK_KEY } from "@/components/AutoWorkController";
 import { personaFor } from "@landed/shared/agents/personas";
+import AgentDashboard from "@/components/agents/AgentDashboard";
 
 type JobView = MonitorJob;
 type JobTypeMeta = { type: string; title: string; description: string; playbook: string };
@@ -77,6 +78,10 @@ export default function AgentsView() {
   const [playbooks, setPlaybooks] = useState<string[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [files, setFiles] = useState<InstrFile[]>([]);
+  // Agent types that actually have run telemetry, and which one the Dashboard tab is showing.
+  // Persisted so switching tabs returns you to the agent you were looking at.
+  const [metricTypes, setMetricTypes] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [openGuide, setOpenGuide] = useState<string | null>(null);
 
@@ -95,6 +100,17 @@ export default function AgentsView() {
   // cause the cascading render the rule guards against.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
+
+  // The types with telemetry. Fetched once — the reply also sweeps the run journals server-side, so
+  // opening this page is what records any run that finished with nobody attached.
+  useEffect(() => {
+    fetch("/api/agents/metrics")
+      .then((r) => r.json())
+      .then((d: { types?: string[] }) => {
+        setMetricTypes(d.types ?? []);
+      })
+      .catch(() => {});
+  }, []);
 
   const lastActive = jobs[0]?.createdAt ?? null;
   const titleOf = (type: string) => types.find((t) => t.type === type)?.title ?? type;
@@ -118,7 +134,10 @@ export default function AgentsView() {
 
   const tabs = [
     { id: "chat", label: "Chat" },
-    { id: "monitor", label: failed.length ? `Monitor · ${failed.length}` : "Monitor" },
+    // Monitor merged in here: its cross-agent health table and its failed-job retry are the two
+    // things the per-agent telemetry can't answer (what's waiting RIGHT NOW, and how to requeue).
+    // Its run-history list was the redundant half — the Dashboard's own run list supersedes it.
+    { id: "dashboard", label: failed.length ? `Dashboard · ${failed.length}` : "Dashboard" },
     { id: "mcp", label: "MCP" },
   ];
   // Normalize to a known tab so a stale persisted value (e.g. the removed "connections") falls back to chat.
@@ -151,6 +170,45 @@ export default function AgentsView() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
+        {activeTab === "dashboard" && (
+          <div className="mx-auto max-w-5xl space-y-6">
+            {/* Fleet first: what's queued, what's in flight, and anything that needs a retry —
+                none of which the per-agent telemetry can show, because a run is only recorded once
+                it ENDS. Then the per-agent detail below. */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatCard label="Queued" value={queued} tone="zinc" />
+              <StatCard label="In flight" value={wip} tone="sky" />
+              <StatCard label="Completed today" value={doneToday} tone="emerald" />
+              <StatCard label="Needs attention" value={failed.length} tone="amber" />
+            </div>
+
+            {failed.length > 0 && (
+              <section>
+                <h2 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold uppercase tracking-wider text-amber-300">
+                  <AlertTriangle size={13} /> Needs attention <span className="text-zinc-600">({failed.length})</span>
+                </h2>
+                <div className="space-y-2">
+                  {failed.map((j) => (
+                    <div key={j.id} className="flex items-start gap-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-zinc-100">{titleOf(j.type)} <span className="text-[12px] font-normal text-zinc-600">· {j.id}</span></p>
+                        <p className="mt-0.5 text-[13px] leading-snug text-amber-200/90">{j.error ?? "failed"}</p>
+                        <p className="mt-0.5 text-[12px] text-zinc-600">{j.attempts ?? 0} attempt{(j.attempts ?? 0) === 1 ? "" : "s"} · {ago(j.createdAt)}</p>
+                      </div>
+                      <button onClick={() => retry(j.id)} title="Re-queue with a fresh attempt budget"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-zinc-800 px-2.5 py-1 text-[12px] font-medium text-zinc-200 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-700">
+                        <RotateCcw size={12} /> Retry
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <AgentHealth jobs={jobs} titleOf={titleOf} />
+            <AgentDashboard types={metricTypes} titleOf={titleOf} />
+          </div>
+        )}
         {activeTab === "chat" && (
           <div className="mx-auto max-w-5xl space-y-8">
             <AgentsLive />
@@ -189,41 +247,7 @@ export default function AgentsView() {
           </div>
         )}
 
-        {activeTab === "monitor" && (
-          <div className="mx-auto max-w-5xl space-y-6">
-            {/* Health strip — the at-a-glance state of the agent fleet + queue. */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatCard label="Queued" value={queued} tone="zinc" />
-              <StatCard label="In flight" value={wip} tone="sky" />
-              <StatCard label="Completed today" value={doneToday} tone="emerald" />
-              <StatCard label="Needs attention" value={failed.length} tone="amber" />
-            </div>
 
-            {failed.length > 0 && (
-              <section>
-                <h2 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold uppercase tracking-wider text-amber-300">
-                  <AlertTriangle size={13} /> Needs attention <span className="text-zinc-600">({failed.length})</span>
-                </h2>
-                <div className="space-y-2">
-                  {failed.map((j) => (
-                    <div key={j.id} className="flex items-start gap-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-zinc-100">{titleOf(j.type)} <span className="text-[12px] font-normal text-zinc-600">· {j.id}</span></p>
-                        <p className="mt-0.5 text-[13px] leading-snug text-amber-200/90">{j.error ?? "failed"}</p>
-                        <p className="mt-0.5 text-[12px] text-zinc-600">{j.attempts ?? 0} attempt{(j.attempts ?? 0) === 1 ? "" : "s"} · {ago(j.createdAt)}</p>
-                      </div>
-                      <button onClick={() => retry(j.id)} title="Re-queue with a fresh attempt budget"
-                        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-zinc-800 px-2.5 py-1 text-[12px] font-medium text-zinc-200 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-700">
-                        <RotateCcw size={12} /> Retry
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-            <AgentMonitor jobs={jobs} titleOf={titleOf} />
-          </div>
-        )}
       </div>
     </div>
   );

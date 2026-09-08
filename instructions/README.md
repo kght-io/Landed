@@ -47,6 +47,8 @@ folder one level up from this file, i.e. the parent of `instructions/`.)
 │   └── <company-slug>/
 │       ├── context.md       ← DB dump: intel, loop, fit, JD, prep profile
 │       ├── transcripts/     ← DB dump: call transcripts the user pastes (input #2) — READ-ONLY
+│       │                      each file is named for the round label the user typed
+│       │                      (`recruiter-screen.md`); unlabelled ones fall back to `transcript-N.md`
 │       ├── emails.md        ← DB dump: interviewing emails you capture (input #1) — READ-ONLY
 │       └── attachments/     ← role PDFs / prep guides / take-homes the interview-emails job downloads
 └── resume/
@@ -153,8 +155,17 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   the Changes page — an inbox sync never writes to the tracker directly)
 - `watchlist-add.md` — research + configure a company (fetch method, titles), then watchlist it
 - `leveling.md` — fetch a company's levels.fyi ladder (lazy; queued from the fit view's Lvl column)
+- `leveling-map.md` — work out what a company's **rungs mean** (posting titles → seniority band),
+  confirmed by web search, stored via `upsertCompanies`' `ladderMap`. Once per company, cached; it
+  never looks at a posting. **Distinct from `leveling.md`**: that one collects levels.fyi geometry to
+  draw the Lvl popover's bars and nothing filters on it, while this is what the scan's level gate
+  reads. Different columns (`leveling` vs `ladder_map`), neither reads the other.
 - `watchlist-scan.md` — check watchlisted companies' boards for new postings
-- `fit.md` — score fit for postings
+- `fit.md` — assess fit: return a **verdict per rubric criterion** (`met`/`partial`/`unmet`/
+  `unclear`/`na`) with evidence, NOT a score. The app computes the score from the verdicts
+  (`decide()`), so it's auditable, re-weightable without re-running the agent, and correctable — a
+  human override on a verdict recomputes the score. The rubric arrives in `getContext.fitRubric`;
+  `type: "gate"` criteria veto, so `unmet` there is expensive and `partial` is free.
 - `tailoring.md` — tailor a resume per posting
 - `interview-brief.md` — synthesize a **versioned, source-tagged interview brief** (role · TC · team ·
   what-they're-looking-for · next step · gaps-to-prep) from everything already dumped under
@@ -189,13 +200,35 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
   (latest-only, no version history). Queued by the **Generate / Regenerate** button in the **Peer comp
   comparison** popup, which opens from the **Compare comp** button on the pipeline's Interviewing view.
 > **The discovery funnel (glance → fit → tailor → apply):** `watchlist-scan` is a cheap **glance**
-> — you judge each candidate on **title + location only, NO JD** — and you submit a verdict per
-> posting with **`submitGlance`**: **high** → the candidate enters the **fit queue** **and a `fit`
-> job** is created (carrying just the URL — you fetch the JD when you run that fit job, see
-> `fit.md`); **low** → your review; **drop** → discarded. The app also enforces a shared
-> **title-exclude filter** on submit (auto-drops EM / TPM / Security / intern / Solutions etc. even
-> if you sent `high`). You review the **review** / **discarded** buckets on the Discovery page;
-> **high** flows straight to fit without you.
+> — you judge each candidate on **title + department only, NO JD** — and you submit three things per
+> posting with **`submitGlance`**:
+>
+> 1. a **verdict** — **high** / **low** (both land in the human's Scan-results tab to triage) or
+>    **drop** (discarded). **Nothing is auto-queued to fit**; the human decides what gets assessed.
+> 2. **`bands`** — the seniority band(s) the posting sits in, read off the company's **`ladderMap`**
+>    (which `scanCompany` hands you alongside the shortlist). Give **every** band it might be when
+>    the ladder is ambiguous. Listing two KEEPS the posting; collapsing to one can silently delete a
+>    role worth seeing. No `ladderMap`, or a title the ladder can't place → omit `bands` and do not
+>    drop on level.
+> 3. **`rank`** — 1-based ordering within that company's board, sent for the whole board in one call.
+>    The Scan-results view groups by company and sorts on it.
+>
+> The app enforces a shared **title-exclude filter** on submit (auto-drops EM / TPM / Security /
+> intern / Solutions etc. even if you sent `high`).
+>
+> **The mechanical pre-filter no longer judges level or discipline.** It used to substring-match a
+> per-company title list, and its strictness was arbitrary — one company's list dropped every Staff
+> role, another's dropped every unlevelled title, a third's filtered nothing. Stage 1 now decides
+> only what a title can settle with confidence: a clearly non-engineering role, a location outside
+> the target, and a posting already tracked as an application. Seniority is your call (with the
+> ladder), and a title with no recognizable SWE signal is **ranked low, never dropped**.
+>
+> **`dismiss_reason` is not yours to set.** When a human discards a scan result they also pick a
+> reason — `role` | `stack` | `domain` | `level` | `company` | `other` — and it is stored on the posting as
+> the supervised label the scan filter is scored against. It records a judgment only the human can
+> make (wrong kind of engineering, uninteresting problem space, wrong rung, wrong company). A `submitGlance`
+> **drop** correctly leaves it **null**; never invent a value for it, or the label set stops meaning
+> "the human rejected this for this reason" and the measurement it exists for becomes worthless.
 >
 > **Company cooldown:** a company that rejected us after a *real* interview loop is skipped by
 > discovery for **six months**. `listWatchlist` / `listCompanies` show it as `cooldownUntil` (a

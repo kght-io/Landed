@@ -97,6 +97,37 @@ export const baseArgs = (mcp: string): string[] => [
 // tree: the caller sets cwd to the company's own subfolder (so its research .md files are right
 // there); `--add-dir <interview-prep root>` lifts the ceiling to sibling companies + GLOBAL/ readiness
 // material, but no higher.
+// One interactive chat turn: the argv, and the prompt to write to the child's STDIN.
+//
+// The prompt is NEVER an argv value. `claude -p <message>` breaks the moment a message starts with a
+// dash — the CLI reads it as a flag — and "starts with a dash" is just a markdown bullet, which is
+// how people paste a list of links or a diff line:
+//     claude -p "- say OK"   →  error: unknown option '- say OK'
+// Passing it as valueless `-p` plus stdin sidesteps argv parsing entirely.
+//
+// A `--` separator was the other option and is worse: it ends flag parsing, so `--output-format
+// json` after it is swallowed as prompt text and the caller gets prose instead of JSON.
+export function chatTurnArgs(opts: {
+  message: string;
+  sid: string;
+  resume: boolean;
+  context?: string;
+  extra?: string[];
+}): { args: string[]; stdin: string } {
+  return {
+    args: [
+      "-p", // valueless: read the prompt from stdin
+      ...(opts.resume ? ["-r", opts.sid] : ["--session-id", opts.sid]),
+      // Scoping seeds a NEW session only — a resume already carries it. Safe as a flag VALUE even
+      // when dash-leading, since the CLI isn't reading it positionally.
+      ...(!opts.resume && opts.context?.trim() ? ["--append-system-prompt", opts.context.trim()] : []),
+      "--output-format", "json",
+      ...(opts.extra ?? []),
+    ],
+    stdin: opts.message,
+  };
+}
+
 export const prepChatArgs = (prepRoot: string): string[] => [
   "--add-dir", prepRoot,
   "--allowedTools", "Read,Glob,Grep,WebSearch,WebFetch",

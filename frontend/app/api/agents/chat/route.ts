@@ -1,14 +1,12 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { CLAUDE_BIN, mcpConfigPath, claudeEnv, baseArgs, prepChatArgs } from "@landed/backend/agents/claude-code";
+import { CLAUDE_BIN, mcpConfigPath, claudeEnv, baseArgs, prepChatArgs, chatTurnArgs } from "@landed/backend/agents/claude-code";
 import { PREP_ROOT, ensurePrepDir, ensurePrepFiles } from "@landed/backend/prep/export-context";
 import { REPO_ROOT } from "@landed/backend/paths";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // a turn can take a while (model + tool calls)
 
-const run = promisify(execFile);
 
 // One chat turn. A NEW session (no `resume`) is created with a fixed id and the scoping `context`
 // appended to its system prompt; a RESUME continues an existing session (its system prompt is
@@ -25,15 +23,25 @@ async function runTurn(opts: { message: string; sid: string; resume: boolean; co
   // turn — a resume skips the dump below, and a company nobody has dumped yet has no folder at all.
   const prepDir = opts.slug ? ensurePrepDir(opts.slug) : null;
   if (prepDir) ensurePrepFiles(opts.slug!, { resumed: opts.resume }); // context files on disk before the turn
-  const args = [
-    "-p", opts.message,
-    ...(opts.resume ? ["-r", opts.sid] : ["--session-id", opts.sid]),
-    ...(!opts.resume && opts.context?.trim() ? ["--append-system-prompt", opts.context.trim()] : []),
-    "--output-format", "json",
-    ...(prepDir ? prepChatArgs(PREP_ROOT) : baseArgs(mcpConfigPath())),
-  ];
+  const { args, stdin } = chatTurnArgs({
+    message: opts.message,
+    sid: opts.sid,
+    resume: opts.resume,
+    context: opts.context,
+    extra: prepDir ? prepChatArgs(PREP_ROOT) : baseArgs(mcpConfigPath()),
+  });
   const cwd = prepDir ?? REPO_ROOT;
-  const { stdout } = await run(CLAUDE_BIN, args, { cwd, env: claudeEnv(), maxBuffer: 16 * 1024 * 1024 });
+  // The prompt goes over stdin, never argv — see chatTurnArgs. A message starting with "-" (any
+  // markdown bullet) was otherwise parsed as a flag and the whole turn failed.
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const child = spawn(CLAUDE_BIN, args, { cwd, env: claudeEnv() });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { err += d; });
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(err.trim() || `claude exited ${code}`))));
+    child.stdin.end(stdin);
+  });
   return JSON.parse(stdout) as { session_id?: string; result?: string; is_error?: boolean };
 }
 

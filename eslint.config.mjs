@@ -38,6 +38,10 @@ const eslintConfig = defineConfig([
     // enough to block a push, which is how this was found.
     "desktop/dist/**",
     "desktop/release/**",
+    // The demo server's build output (`npm run demo` sets NEXT_DIST_DIR=.next-demo so it can run
+    // beside the real dev server). Same story as `.next`: generated, gitignored, and 2,000+ errors
+    // about bundled code nobody wrote — which blocked a push.
+    "**/.next-demo/**",
   ]),
 ]);
 

@@ -13,6 +13,38 @@ MCP server.
 > `better-sqlite3`. Two actors edit the data: **You** (the human, via the UI) and
 > **the agent** (a Claude Code session, via MCP) — every change is attributed to one of them.
 
+## Screenshots
+
+All screenshots use seeded demo data — the companies are fictional.
+
+**The pipeline board** — one stage-aware view from discovery through closed, with the agent's fit score and the gaps it found.
+
+![Pipeline board](docs/screenshots/pipeline-board.jpg)
+
+**Watchlist scanning** — the agent scans boards on your watchlist and cuts what doesn't match before you see it.
+
+![Watchlist scan results](docs/screenshots/watchlist-scan.jpg)
+
+**Per-company prep chat** — a Claude Code session scoped to one company, with that company's research files already loaded.
+
+![Per-company prep chat](docs/screenshots/prep-chat.jpg)
+
+**Agents** — one agent per task, each a live Claude Code conversation over MCP. Watch every step, or steer it.
+
+![Agents](docs/screenshots/agents.jpg)
+
+**Change log** — the agent reads your inbox and proposes stage changes. Nothing is applied until you approve it.
+
+![Change log](docs/screenshots/changes.jpg)
+
+**Dashboard** — applications, pipeline funnel, and interview rate.
+
+![Dashboard](docs/screenshots/dashboard.jpg)
+
+**Ops** — the pipeline grading its own calls: precision and recall on what it kept versus what you actually wanted, and whether the fit score predicts callbacks at all.
+
+![Ops view](docs/screenshots/ops.jpg)
+
 ## Features
 
 - **Unified pipeline** — one stage-aware board from discovery → fit → tailor →

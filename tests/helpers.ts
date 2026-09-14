@@ -107,6 +107,26 @@ export function seedCandidate(opts: {
 }
 
 
+// Stand in for a Greenhouse board: the jobs list and the departments endpoint scanCompany reads.
+// Replaces globalThis.fetch — the calling test restores it in its own afterEach.
+export function mockGreenhouse(jobs: { id: number; title: string; location: string; dept?: string }[]) {
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const u = String(url);
+    const body = u.includes("/departments")
+      ? { departments: jobs.map((j) => ({ name: j.dept ?? "Engineering", jobs: [{ id: j.id }] })) }
+      : {
+          jobs: jobs.map((j) => ({
+            id: j.id,
+            title: j.title,
+            location: { name: j.location },
+            absolute_url: `https://example.com/${j.id}`,
+            updated_at: "2026-08-01T00:00:00Z",
+          })),
+        };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+}
+
 // An inbox sync doesn't write — it parks every change it derived for you to approve on the Changes
 // page (see reconcile's `approval` mode). Tests that care about the RESULT of a sync take the
 // approval hop through this: approve each parked change the way the UI's Approve button does

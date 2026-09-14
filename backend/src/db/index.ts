@@ -4,6 +4,7 @@ import { repoPath } from "../paths";
 import { ASSET_ROOT } from "../config";
 import Database from "better-sqlite3";
 import { addColumn } from "./add-column";
+import { STARTER_CRITERIA } from "../fitlab/seed";
 import { backfillPrepAssets } from "./backfill-prep-assets";
 import { adoptCarvedOutJudgment, backfillBaselineAttribution, renumberBaselineToV0, seedPromptVersions } from "./seed-prompts";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -348,6 +349,22 @@ function connection() {
     labeled_at TEXT
   )`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_fit_verdicts_run ON fit_verdicts(run_id)");
+  // `role-discipline` used to point the agent at `excludeDisciplines`, a profile field that no longer
+  // exists — it split into excludeRoles / excludeStacks / excludeDomains. listCriteria() only fills
+  // MISSING keys (so a tuned weight is never clobbered), which means an install seeded before the
+  // split keeps a definition naming a field the agent will look for and not find: the gate would
+  // quietly stop vetoing anything.
+  //
+  // Guarded on the definition still naming the dead field: that's what makes it a no-op once
+  // rewritten, and it deliberately DOES rewrite a hand-edited definition that still names it — an
+  // instruction pointing at a field that doesn't exist is broken however it got there. The current
+  // seed text names the three axes instead, so the guard can't match it and this can't loop.
+  const roleDisciplineDef = STARTER_CRITERIA.find((c) => c.key === "role-discipline")?.definition;
+  if (roleDisciplineDef && !roleDisciplineDef.includes("excludeDisciplines")) {
+    sqlite
+      .prepare("UPDATE fit_criteria SET definition = ? WHERE key = 'role-discipline' AND definition LIKE '%excludeDisciplines%'")
+      .run(roleDisciplineDef);
+  }
 
   // Agent run telemetry. The run journals keep ONE run per type and are truncated on the next
   // launch, so any question about a trend is unanswerable without keeping the result frames here.

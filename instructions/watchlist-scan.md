@@ -54,7 +54,11 @@ mean something relative to each other. Rank on:
 
 1. **Level fit** — squarely in my band beats above or below it.
 2. **Discipline fit** — how well it matches my `includeDisciplines` (backend, fullstack, platform,
-   infrastructure, distributed systems) and my background.
+   infrastructure, distributed systems) and my background, and how squarely it lands on one of my
+   three exclude axes: `excludeRoles` (a different job), `excludeStacks` (wrong technology),
+   `excludeDomains` (dull problem space). A posting hitting one of those ranks **low** — the exclude
+   axes are ranking signal here, not a drop rule, because they are keywords I typed and a keyword is
+   the wrong instrument for silently removing a role.
 
 A title with no recognizable SWE signal at all ranks **low** — it is not dropped. "No positive
 signal" is the absence of evidence, not evidence of a bad role, and a low rank is something I can
@@ -76,7 +80,9 @@ Rank everything you keep. An unranked posting sorts last, which is not the same 
    - **drop** — clearly not a match → discarded.
    high **and** low both land in my "Scan results" tab for me to triage into Fit myself (I decide what
    to assess); only **drop** is discarded. Nothing is auto-queued to fit.
-   Calibrate against my **profile** from `getContext` (`profile`: level, include/exclude disciplines, locations).
+   Calibrate against my **profile** from `getContext` (`profile`: level, `includeDisciplines`,
+   `excludeRoles` / `excludeStacks` / `excludeDomains`, locations). The three exclude lists grow as I
+   discard postings with a reason — they are my accumulated rejections, so honor them.
 4. **Call the level** (`bands`) and **rank the board** (`rank`) — see below. Both go on the same
    `submitGlance` call as the verdict.
 5. Submit the verdicts with **`submitGlance`** (below).
@@ -85,12 +91,12 @@ Rank everything you keep. An unranked posting sorts last, which is not the same 
    verdicts already went via `submitGlance`; the empty `records` here just closes the job.)
 
 ## Common excludes
-**Title excludes are now enforced by the app on `submitGlance`, for every fetch method** — it
-auto-drops Engineering Manager / TPM / any manager or director (IC only), recruiters, Security,
-Sales / Support / Solutions / Data-science "Engineer" titles, hardware/IT, and junior/intern,
-even if you sent `high`. So you don't have to be perfect here, but still prefer dropping them
-yourself to keep submissions clean. **Location is still yours on manual fetches:** drop **non-US**
-(Canada/UK/etc.) unless the posting also lists a US / remote-US option — the app only location-filters `api`.
+**Title excludes are enforced by the app on `submitGlance`, for every fetch method** — a posting
+carrying any of my profile's `excludeTitleTerms` (from `getContext`) is dropped even if you sent
+`high`. So you don't have to be perfect here, but still prefer dropping them yourself to keep
+submissions clean. **Location is still yours on manual fetches:** drop a posting whose location hits
+my `excludeLocationTerms` unless it also hits `allowLocationTerms`, and keep only what matches my
+`locations` — the app only location-filters `api`.
 
 ## Output — submit your glance verdicts
 Call **`submitGlance`** with one object per candidate, carrying the verdict, the level call

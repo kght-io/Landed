@@ -51,7 +51,7 @@ export const STARTER_CRITERIA: Omit<Criterion, "active">[] = [
     weight: 0,
     sortOrder: 4,
     definition:
-      "GATE. Is this the KIND of engineering the candidate does? Judge the posting's discipline against the profile's includeDisciplines and excludeDisciplines. A posting squarely in an included discipline is met; adjacent is partial; one whose primary discipline is excluded (e.g. SRE, ML/research, mobile, frontend-only, data engineering — whatever the profile excludes) is unmet even when the title says Software Engineer and the seniority fits. This is DIFFERENT from domain-relevance (which problem space) and from must-have-coverage (whether the candidate clears the posting's bar): this asks whether the job is the candidate's line of work at all. Because it vetoes, reserve `unmet` for a posting whose PRIMARY discipline is excluded — anything arguable is `partial`, which costs nothing.",
+      "GATE. Is this the KIND of engineering the candidate does? Judge the posting against the profile's includeDisciplines plus TWO exclude axes: excludeRoles (a different job — SRE, ML/research, data engineering, IT) and excludeStacks (the same job on the wrong technology — iOS/Android, frontend-only, C++). A posting squarely in an included discipline is met; adjacent is partial; one whose PRIMARY role or stack is excluded is unmet even when the title says Software Engineer and the seniority fits. Ignore excludeDomains here — problem space is domain-relevance's question, not this one, and double-counting it would let a dull-but-suitable posting be vetoed by a criterion that isn't about suitability. Because it vetoes, reserve `unmet` for a clear primary miss — anything arguable is `partial`, which costs nothing.",
   },
   {
     key: "comp-floor",

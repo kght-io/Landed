@@ -52,6 +52,39 @@ export const DISMISS_REASON_HINTS: Record<DismissReason, string> = {
   other: "None of the above",
 };
 
+// ── the keyword axes ──────────────────────────────────────────────────────────────────────────
+// Three of the six reasons name something a KEYWORD can express, and those three are the ones that
+// can be fed back into the profile so the same rejection doesn't have to be made twice. The other
+// three can't: `level` is the ladder map's job (a band, not a word), `company` is the watchlist's
+// (remove it, don't filter its titles), and `other` says nothing by definition.
+//
+// So a `stack` discard of "Senior iOS Engineer" can offer to add `iOS` to the profile's excluded
+// stacks, and a `level` discard offers nothing — which is correct, not a gap.
+export const KEYWORD_AXES = ["role", "stack", "domain"] as const;
+export type KeywordAxis = (typeof KEYWORD_AXES)[number];
+
+// Axis → the profile field that holds it. The exclusions are per-axis for the same reason the labels
+// are: one bag can't say whether "data engineer" was the wrong JOB or the wrong PROBLEM, and a filter
+// acting on the bag asserts both.
+export const EXCLUDE_FIELD: Record<KeywordAxis, "excludeRoles" | "excludeStacks" | "excludeDomains"> = {
+  role: "excludeRoles",
+  stack: "excludeStacks",
+  domain: "excludeDomains",
+};
+
+// What the axis is called where the user sees it, and how each is described. Same wording as the
+// discard chips on purpose: the popup is a continuation of the click that opened it, so the noun
+// must not change on the way.
+export const AXIS_LABELS: Record<KeywordAxis, string> = {
+  role: "excluded roles",
+  stack: "excluded stacks",
+  domain: "excluded domains",
+};
+
+export function axisForReason(r: DismissReason): KeywordAxis | null {
+  return (KEYWORD_AXES as readonly string[]).includes(r) ? (r as KeywordAxis) : null;
+}
+
 // The guard every writer goes through. Agent/JSON/HTTP input arrives as `unknown`, and a value that
 // isn't in the set must not reach the column: the scorer groups by this field, so one stray string
 // becomes a bucket that silently splits the dataset.

@@ -1,7 +1,7 @@
 import "./setup";
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { reset, db, companies, postings } from "./helpers";
+import { reset, db, companies, postings, mockGreenhouse } from "./helpers";
 import { applyGlance, upsertCompanies } from "@landed/backend/db/queries";
 import { scanCompany } from "@landed/backend/jobs/scan";
 import { setProfile } from "@landed/backend/db/profile";
@@ -81,24 +81,6 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-function mockGreenhouse(jobs: { id: number; title: string; location: string; dept?: string }[]) {
-  globalThis.fetch = (async (url: string | URL | Request) => {
-    const u = String(url);
-    const body = u.includes("/departments")
-      ? { departments: jobs.map((j) => ({ name: j.dept ?? "Engineering", jobs: [{ id: j.id }] })) }
-      : {
-          jobs: jobs.map((j) => ({
-            id: j.id,
-            title: j.title,
-            location: { name: j.location },
-            absolute_url: `https://example.com/${j.id}`,
-            updated_at: "2026-08-01T00:00:00Z",
-          })),
-        };
-    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-  }) as typeof fetch;
-}
-
 function seedBoard(name: string, titles: string[]) {
   db.insert(companies)
     .values({ name, tier: "tier1", ats: "greenhouse", slug: "acme", fetchMethod: "api", watchlist: true, targetTitles: JSON.stringify(titles) })
@@ -141,8 +123,8 @@ test("a title with no recognized SWE signal is kept for ranking, not filtered", 
   assert.equal(row.state, "matched");
 });
 
-// The gates that stayed. NON_ENG is high-confidence and carries 1207 of the drops — moving it would
-// have flooded the agent with sales roles for no recall gain.
+// The gates that stayed. The profile's title terms are high-confidence and carry 1207 of the drops —
+// moving them to the agent would have flooded it with sales roles for no recall gain.
 test("the non-engineering filter still drops at stage 1", async () => {
   seedBoard("Acme", []);
   mockGreenhouse([{ id: 4, title: "Enterprise Sales Engineer", location: "New York, NY", dept: "Sales" }]);

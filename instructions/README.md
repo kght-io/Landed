@@ -216,8 +216,12 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
 > 3. **`rank`** — 1-based ordering within that company's board, sent for the whole board in one call.
 >    The Scan-results view groups by company and sorts on it.
 >
-> The app enforces a shared **title-exclude filter** on submit (auto-drops EM / TPM / Security /
-> intern / Solutions etc. even if you sent `high`).
+> The app enforces the profile's **`excludeTitleTerms`** on submit — the same list the api scan drops
+> on — so a posting carrying one is dropped even if you sent `high`. The api scan's location gate is
+> the profile's too: `locations`, **`excludeLocationTerms`** (locales out of range even when "remote")
+> and **`allowLocationTerms`** (re-admits a dual listing such as "Remote - US/Canada"). None of these
+> lists lives in code; read them from `getContext.profile`. Unlike `excludeRoles` / `excludeStacks` /
+> `excludeDomains` (guidance you weigh), these are matched mechanically and drop.
 >
 > **The mechanical pre-filter no longer judges level or discipline.** It used to substring-match a
 > per-company title list, and its strictness was arbitrary — one company's list dropped every Staff
@@ -232,6 +236,16 @@ and submit each via `submitJobResult` with **no `jobId`** (the app synthesizes a
 > make (wrong kind of engineering, uninteresting problem space, wrong rung, wrong company). A `submitGlance`
 > **drop** correctly leaves it **null**; never invent a value for it, or the label set stops meaning
 > "the human rejected this for this reason" and the measurement it exists for becomes worthless.
+>
+> Three of those six reasons name something a keyword can express, and each has a matching profile
+> list: `role` → **`excludeRoles`** (a different job), `stack` → **`excludeStacks`** (same job, wrong
+> technology), `domain` → **`excludeDomains`** (same job and stack, dull problem space). Discarding
+> with one of those reasons offers to add the keyword, so the profile you read is the human's
+> accumulated rejections rather than a list they wrote once. The other three have no keyword by
+> design: `level` is the ladder map's job (a band, not a word), `company` is the watchlist's, and
+> `other` says nothing. **These lists are RANKING signal at the glance, never a drop rule** — a
+> keyword that silently removed postings would reintroduce exactly the unobservable false negatives
+> the level gate was taken out for.
 >
 > **Company cooldown:** a company that rejected us after a *real* interview loop is skipped by
 > discovery for **six months**. `listWatchlist` / `listCompanies` show it as `cooldownUntil` (a

@@ -11,7 +11,7 @@ import { TRACKER_STAGES } from "@landed/shared/pipeline/stages";
 import { canonical, norm } from "@landed/shared/agents/canonical";
 import { getProfile } from "../db/profile";
 import { isCompanyCooling } from "../db/cooldown";
-import { NON_ENG } from "@landed/shared/jobs/exclude";
+import { termMatcher } from "@landed/shared/jobs/exclude";
 // stripHtml lives in `shared` so the triage panel can reuse its entity decoding to repair JDs that
 // were stored before the double-decode fix — without re-scanning every board.
 import { stripHtml } from "@landed/shared/jobs/jd";
@@ -73,53 +73,47 @@ const chunk = <T>(arr: T[], n: number): T[][] => {
 // isQuant, plus the ENG_POS_TITLE + ENG_DEPT discipline check) is GONE, not disabled. Seniority and
 // discipline are stage-2 judgments now — see classifyJob's note — and a dead code path that still
 // compiles is an invitation to wire it back up by accident.
-const LOC_ALIASES: Record<string, string[]> = {
-  nyc: ["new york", "nyc", "ny "],
-  "new york": ["new york", "nyc", "ny "],
-  remote: ["remote", "anywhere"],
+// Location is decided entirely by the profile: `locations` (where you'll work), `excludeLocationTerms`
+// (locales out of range even when a posting says "remote") and `allowLocationTerms` (what re-admits a
+// posting that names both, e.g. a dual US/Canada listing). The spellings a city goes by belong in
+// `locations` as well — there is no alias table, so a short form matches because it's written there.
+export type LocationFilter = {
+  include: (s: string) => boolean; // in your target locations — always true when you set none
+  exclude: (s: string) => boolean;
+  allow: (s: string) => boolean;
+  guard: boolean; // whether the excluded-locale guard applies at all
 };
+
 // Split on both `|` and `,` so either format tokenizes: the profile's prose ("New York, Remote")
-// and the legacy per-company pipe form ("NYC|remote").
-function locTokens(loc: string): string[] {
-  const out = new Set<string>();
-  for (const part of loc.split(/[|,]/)) {
-    const k = part.toLowerCase().trim();
-    if (!k) continue;
-    out.add(k);
-    if (LOC_ALIASES[k]) LOC_ALIASES[k].forEach((a) => out.add(a));
-  }
-  return [...out];
-}
-// NON_ENG (the exclude filter) is shared with applyGlance — see shared/src/jobs/exclude.ts — so
-// every fetch method gets the same non-engineering floor whether the app or the agent read the board.
-// Non-US locales that otherwise sneak past a "remote" token ("Toronto, CAN-Remote",
-// "Remote in Canada", "Remote - United Kingdom"), and the US signals that re-allow a
-// dual posting ("Remote - US/Canada", "NYC or Remote (US/Canada)").
-const NON_US =
-  /\b(canada|canadian|can|british columbia|\bbc\b|alberta|calgary|edmonton|waterloo|kitchener|toronto|vancouver|montreal|ottawa|ontario|quebec|united kingdom|uk|london|england|scotland|ireland|dublin|germany|berlin|munich|france|paris|netherlands|amsterdam|spain|barcelona|madrid|portugal|lisbon|poland|warsaw|switzerland|zurich|sweden|stockholm|singapore|japan|tokyo|china|shanghai|hong kong|india|bangalore|bengaluru|hyderabad|pune|australia|sydney|melbourne|new zealand|israel|tel aviv|brazil|mexico|argentina|colombia|emea|apac|latam)\b/i;
-const US_SIGNAL =
-  /\b(united states|usa|u\.s\.|us|new york|nyc|san francisco|seattle|austin|boston|chicago|los angeles|denver|atlanta|washington|portland|remote[- ]us|us[- ]remote)\b/i;
+// and the pipe form ("New York City|Brooklyn").
+const locTokens = (loc: string): string[] => loc.split(/[|,]/).map((p) => p.trim()).filter(Boolean);
 
-function matchesLocation(loc: string | null, tokens: string[], usOnly: boolean): boolean {
+function matchesLocation(loc: string | null, f: LocationFilter): boolean {
   if (!loc) return true; // unknown location → keep (don't silently drop)
-  const l = loc.toLowerCase();
-  // US guard runs FIRST (even when there are no city tokens): drop clearly non-US postings
-  // even if they say "remote", unless the posting also names the US (dual US/Canada stay).
-  if (usOnly && NON_US.test(l) && !US_SIGNAL.test(l)) return false;
-  if (tokens.length === 0) return true; // no city criteria → US guard already applied
-  return tokens.some((tok) => l.includes(tok));
+  // The guard runs FIRST, even with no target tokens: an excluded locale drops even when it says
+  // "remote", unless the posting also carries an allow term (dual listings stay).
+  if (f.guard && f.exclude(loc) && !f.allow(loc)) return false;
+  return f.include(loc);
 }
 
-// The location gate: the candidate's target-location tokens + whether the US-only guard applies.
-// Sourced from the single profile `locations` (getProfile) — the same preference the fit pass reads —
-// NOT a per-company field, so every company scans against one location identity. US-only is the
-// global default (you're US-based); only a target that EXPLICITLY names a non-US place opts out.
-// Shared by the scan classifier and the non-local purge so both decide "is this role in range?" identically.
-function locFilter(): { lTok: string[]; usOnly: boolean } {
-  const loc = getProfile().locations?.trim() ?? "";
-  const lTok = loc ? locTokens(loc) : [];
-  const usOnly = !(loc && NON_US.test(loc) && !US_SIGNAL.test(loc));
-  return { lTok, usOnly };
+// The location gate, compiled once per scan from the profile — the same `locations` the fit pass
+// reads, NOT a per-company field, so every company scans against one location identity. Shared by
+// the scan classifier and the non-local purge so both decide "is this role in range?" identically.
+// The guard stands down when your own target names an excluded locale with no allow term: you asked
+// for that place.
+function locFilter(): LocationFilter {
+  const p = getProfile();
+  const loc = p.locations?.trim() ?? "";
+  const tokens = loc ? locTokens(loc) : [];
+  const exclude = termMatcher(p.excludeLocationTerms);
+  const allow = termMatcher(p.allowLocationTerms);
+  return {
+    // No target locations means no city criterion — the guard alone decides.
+    include: tokens.length ? termMatcher(tokens) : () => true,
+    exclude,
+    allow,
+    guard: !(loc && exclude(loc) && !allow(loc)),
+  };
 }
 
 // The stored ladder map, or null. Unreadable JSON is indistinguishable from absent — both mean the
@@ -138,13 +132,13 @@ function readLadderMap(raw: string | null): LadderMap | null {
 // so they shouldn't linger in the archive either; this also sweeps stale rows no longer in the feed.
 // Only these two archive states are touched — an active/manual decision (queued/applied/…) is never
 // deleted. Returns how many rows were removed.
-export function purgeNonLocal(companyId: number, lTok: string[], usOnly: boolean): number {
+export function purgeNonLocal(companyId: number, f: LocationFilter): number {
   const rows = db
     .select()
     .from(postings)
     .where(and(eq(postings.companyId, companyId), inArray(postings.state, ["filtered", "dismissed"])))
     .all();
-  const stale = rows.filter((r) => !matchesLocation(r.location, lTok, usOnly)).map((r) => r.id);
+  const stale = rows.filter((r) => !matchesLocation(r.location, f)).map((r) => r.id);
   if (stale.length) db.delete(postings).where(inArray(postings.id, stale)).run();
   return stale.length;
 }
@@ -153,10 +147,10 @@ export function purgeNonLocal(companyId: number, lTok: string[], usOnly: boolean
 // `npm run purge:nonlocal`; ongoing scans purge their own company incrementally). Returns the total.
 export function purgeAllNonLocal(): number {
   const cos = db.select().from(companies).all();
-  const { lTok, usOnly } = locFilter();
+  const f = locFilter();
   let total = 0;
   for (const co of cos) {
-    total += purgeNonLocal(co.id, lTok, usOnly);
+    total += purgeNonLocal(co.id, f);
   }
   return total;
 }
@@ -231,17 +225,18 @@ async function listAshby(slug: string, company: string): Promise<ScannedJob[]> {
 //                 It caught "AI Research Engineer" and "Performance Engineer" as readily as junk.
 //                 Those now reach 2c and get ranked low, which is observable; a drop isn't.
 //
-// What stayed is what a title can settle: a clear non-eng term, a location outside the target, and a
-// posting already tracked as an application. NON_ENG alone carries 1207 of the drops — moving it
-// would have flooded the agent with sales roles for no recall gain.
+// What stayed is what a title can settle: a clear non-engineering term, a location outside the target,
+// and a posting already tracked as an application. The title terms alone carry 1207 of the drops —
+// moving them to the agent would have flooded it with non-engineering roles for no recall gain. Both
+// term lists are the profile's (excludeTitleTerms, the location fields); this function holds none.
 type ScanReason = "kept" | "excluded" | "location" | "dedup";
 function classifyJob(
   j: ScannedJob,
-  o: { lTok: string[]; usOnly: boolean; roleSet: Set<string>; urlSet: Set<string> }
+  o: { locGate: LocationFilter; excludeTitle: (s: string) => boolean; roleSet: Set<string>; urlSet: Set<string> }
 ): ScanReason {
   const hay = `${j.title} ${j.department ?? ""}`;
-  if (NON_ENG.test(hay)) return "excluded"; // clearly non-eng → confident drop
-  if (!matchesLocation(j.location, o.lTok, o.usOnly)) return "location";
+  if (o.excludeTitle(hay)) return "excluded"; // a profile title term → confident drop
+  if (!matchesLocation(j.location, o.locGate)) return "location";
   if (o.roleSet.has(norm(j.title)) || (j.url && o.urlSet.has(j.url))) return "dedup"; // already a tracked application
   return "kept";
 }
@@ -321,7 +316,9 @@ export async function scanCompany(name: string, withJd = true): Promise<ScanResu
     const jobs = isGh ? await listGreenhouse(co.slug!, co.name) : await listAshby(co.slug!, co.name);
     const fetched = jobs.length;
 
-    const { lTok, usOnly } = locFilter();
+    // Both stage-1 gates compiled once per scan from the profile, not per posting.
+    const locGate = locFilter();
+    const excludeTitle = termMatcher(getProfile().excludeTitleTerms);
     const ladderMap = readLadderMap(co.ladderMap);
 
     // This company's existing postings — one fetch drives prior-state preservation, application
@@ -343,11 +340,11 @@ export async function scanCompany(name: string, withJd = true): Promise<ScanResu
     const seenRoles = new Set(seen.map((r) => norm(r.title ?? "")));
     const seenUrls = new Set(seen.map((r) => r.url).filter(Boolean) as string[]);
 
-    const verdicts = jobs.map((j) => ({ j, reason: classifyJob(j, { lTok, usOnly, roleSet, urlSet }) }));
+    const verdicts = jobs.map((j) => ({ j, reason: classifyJob(j, { locGate, excludeTitle, roleSet, urlSet }) }));
     persistScan(co.id, verdicts, prior, seenRoles, seenUrls);
     // Non-local roles are never filed (persistScan skips the "location" reason); also clear any that
     // lingered in this company's Filtered / Discarded piles from before this rule (or now off the feed).
-    purgeNonLocal(co.id, lTok, usOnly);
+    purgeNonLocal(co.id, locGate);
 
     // the live shortlist = kept jobs not already dismissed in the triage store
     const matched = verdicts.filter((v) => v.reason === "kept" && prior.get(v.j.atsId ?? "") !== "dismissed").map((v) => v.j);

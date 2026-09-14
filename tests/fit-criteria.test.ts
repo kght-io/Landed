@@ -31,13 +31,28 @@ test("every criterion has a judging definition and a stable key", () => {
 // frontend). The old rubric had nowhere for that to fail: `domain-relevance` is the problem space
 // and `must-have-coverage` is whether the candidate clears THEIR bar, which is the opposite question.
 // A GATE, not a weighted criterion. With eight criteria, one `must` miss at weight 3 still scores
-// 75 and advances — so a weighted discipline miss would have changed nothing. `excludeDisciplines`
+// 75 and advances — so a weighted discipline miss would have changed nothing. An excluded discipline
 // means excluded, and this was 20 of the first 32 hand-discards.
 test("discipline is its own criterion, and it vetoes", () => {
   const c = by("role-discipline");
   assert.ok(c, "the rubric can fail a posting for being the wrong discipline");
   assert.equal(c.type, "gate");
   assert.match(c.definition, /partial/i, "and arguable cases go to `partial`, which costs nothing");
+});
+
+// The definition is the instruction handed to the LLM, so a field name in it is load-bearing: the
+// agent looks the field up on the profile it was given. `excludeDisciplines` split into three axes,
+// and an instruction still naming it would send the agent looking for something that isn't there —
+// the gate would quietly stop vetoing. (A pre-split install is rewritten by a guarded migration in
+// db/index.ts, which keys off exactly this string.)
+test("the discipline gate names the profile fields that actually exist", () => {
+  const d = by("role-discipline").definition;
+  assert.equal(d.includes("excludeDisciplines"), false, "the retired field is gone");
+  assert.match(d, /excludeRoles/, "a different job");
+  assert.match(d, /excludeStacks/, "the same job, wrong technology");
+  // Problem space is domain-relevance's question. Counting it here too would let a dull-but-suitable
+  // posting be vetoed by a criterion that isn't about suitability.
+  assert.match(d, /Ignore excludeDomains/, "and domain is explicitly not this criterion's business");
 });
 
 // Comp is a signal, never a gate. Most postings don't state a range, and a gate that fires on

@@ -10,6 +10,7 @@ import { isHiddenWhileCooling } from "@landed/shared/pipeline/cooldown";
 import { parseRedoLog } from "@landed/shared/jobs/redolog";
 import { parseBriefs } from "@landed/shared/jobs/briefs";
 import { isExcludedTitle } from "@landed/shared/jobs/exclude";
+import { getProfile } from "./profile";
 import { isDismissReason, type DismissReason } from "@landed/shared/jobs/dismiss";
 import type { Leveling } from "@landed/shared/config/leveling";
 import { coerceLadderMap, SENIORITY_BANDS, type SeniorityBand } from "@landed/shared/config/ladder";
@@ -810,9 +811,9 @@ export function applyGlance(v: GlanceInput): { ok: boolean; appId?: number; outc
 
   const title = v.title ?? row?.title ?? "(untitled)";
   const department = v.department ?? row?.department ?? null;
-  // Shared exclude — the same filter the api scan uses — overrides the agent's call (EM/TPM/
-  // Security/intern/Solutions etc.), so every fetch method gets a uniform floor.
-  const excluded = isExcludedTitle(title, department);
+  // The profile's title terms — the same list the api scan drops on — override the agent's call, so
+  // every fetch method is filtered by one list.
+  const excluded = isExcludedTitle(title, department, getProfile().excludeTitleTerms);
   // Same shape of server-side override as the exclude filter: a company cooling off after rejecting
   // you doesn't get its finds put in front of you, whatever the agent thought of them.
   const cooling = isCompanyCooling(co);

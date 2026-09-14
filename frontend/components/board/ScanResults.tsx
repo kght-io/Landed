@@ -5,7 +5,8 @@ import { Sparkles, Loader2, ChevronRight, ChevronDown, Trash2, X, ExternalLink, 
 import { useAgentQueue } from "@/components/AgentQueueProvider";
 import DiscardMenu, { DiscardButton } from "@/components/board/DiscardMenu";
 import { anchorFrom } from "@/components/Popover";
-import type { DismissReason } from "@landed/shared/jobs/dismiss";
+import ExcludeSuggest from "@/components/board/ExcludeSuggest";
+import { axisForReason, type DismissReason, type KeywordAxis } from "@landed/shared/jobs/dismiss";
 import { groupByCompany } from "@landed/shared/pipeline/scan-funnel";
 import { jdBlocks } from "@landed/shared/jobs/jd";
 
@@ -24,6 +25,9 @@ export type Scanned = {
   company: string;
   title: string;
   location: string | null;
+  // Not displayed — read by the discard-feedback card, where the org name often carries the signal
+  // the title doesn't ("Software Engineer" in "Ads Platform").
+  department?: string | null;
   url: string | null; // the ATS posting — the title links out to it
   scannedAt: string;
   postedAt: string | null;
@@ -180,9 +184,19 @@ export default function ScanResults({ rows, reload }: { rows: Scanned[] | null; 
   const toggleJd = (id: number) =>
     setOpenJd((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  // The keyword-feedback card, offered AFTER a labelled discard has committed. Holds the discarded
+  // rows' text because the rows themselves are gone by then — the list reloads.
+  const [feedback, setFeedback] = useState<{ axis: KeywordAxis; texts: string[] } | null>(null);
+
   const act = async (targetIds: number[], action: "queue-fit" | "discard", reason?: DismissReason) => {
     if (!targetIds.length || busy) return;
     setBusy(true);
+    // Read the titles BEFORE the discard: the suggestion is drawn from them and `rows` is about to be
+    // replaced by the reload.
+    const texts = targetIds
+      .map((id) => (rows ?? []).find((r) => r.id === id))
+      .filter((r): r is Scanned => !!r)
+      .map((r) => `${r.title} ${r.department ?? ""}`);
     try {
       await Promise.all(targetIds.map((id) =>
         fetch(`/api/scanned/${id}`, {
@@ -191,6 +205,11 @@ export default function ScanResults({ rows, reload }: { rows: Scanned[] | null; 
           body: JSON.stringify({ action, reason }),
         })));
       if (action === "queue-fit") bump(); // handed work to the fit agent — pulse the queue
+      // Three of the six reasons name something a keyword can express; the rest offer nothing, which
+      // is correct rather than a gap (`level` is the ladder map's job, `company` the watchlist's).
+      // Never gates the discard — it has already happened by this point.
+      const axis = action === "discard" && reason ? axisForReason(reason) : null;
+      setFeedback(axis ? { axis, texts } : null);
     } finally {
       setSel(new Set());
       reload();
@@ -397,6 +416,13 @@ export default function ScanResults({ rows, reload }: { rows: Scanned[] | null; 
             </button>
           </div>
         </div>
+      )}
+
+      {/* The discard you just made, offered back as a filter rule. Rendered LAST and only when the
+          bulk bar is gone — they occupy the same spot, and the bulk bar means a selection is still
+          live, so the card would be answering a discard you've already moved on from. */}
+      {feedback && !selIds.length && (
+        <ExcludeSuggest axis={feedback.axis} texts={feedback.texts} onClose={() => setFeedback(null)} />
       )}
     </div>
   );
